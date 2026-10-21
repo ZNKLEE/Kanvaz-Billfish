@@ -3,6 +3,7 @@
 版本：9.9.1。仅供本人和朋友共同修改、维护与私人使用。
 
 本项目在 Kanvaz 基础上加入 Billfish 素材库的只读关联、素材板保存与恢复、素材重新关联、完整打包导出和简体中文界面。
+可以导入视频和图片素材，视频支持序列、帧标记等功能
 
 - [中文使用说明](docs/BILLFISH_USER_GUIDE.md)
 - [Billfish 修改记录](docs/BILLFISH_CHANGELOG.md)
