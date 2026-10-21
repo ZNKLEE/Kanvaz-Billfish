@@ -1486,15 +1486,15 @@ var KanvazUI_Extended = (function() {
       '<div class="about-logo">',
         '<img src="../assets/icons/icon-128.png" alt="" width="44" height="44">',
       '</div>',
-      '<div class="about-title">Kanvaz</div>',
-      '<div class="about-subtitle">A visual reference board for VFX, 3D, and game art.</div>',
+      '<div class="about-title">Kanvaz Billfish 中文素材板</div>',
+      '<div class="about-subtitle">本人和朋友共同维护的私人素材板。</div>',
       '<div class="about-version">v' + appVersion + '</div>',
       '<div id="about-update-status" class="about-update-status"></div>',
       '<div class="about-divider"></div>',
-      '<div class="about-desc">Free and open source, MIT licensed. Fully offline: no login, no telemetry, no background network activity. Your boards never leave this machine.</div>',
+      '<div class="about-desc">素材板保存在本机，Billfish 素材库以只读方式关联。版权及第三方许可见项目中的 LICENSE 和 THIRD_PARTY_NOTICES.md。</div>',
       '<div class="about-divider"></div>',
-      '<div class="about-author">Atharva Patil | <strong>P4inz</strong> | P4inz Interactive Labs</div>',
-      '<div class="about-studio">Navi Mumbai, India</div>'
+      '<div class="about-author">私人协作维护版</div>',
+      '<div class="about-studio">仅供本人和朋友修改与使用</div>'
     ].join('');
 
     var updateBtn = document.createElement('button');
@@ -1511,11 +1511,11 @@ var KanvazUI_Extended = (function() {
        as "Check for updates" — never automatic. */
     var githubBtn = document.createElement('button');
     githubBtn.className = 'about-btn about-btn-github';
-    githubBtn.textContent = 'View on GitHub';
-    githubBtn.title = 'Opens github.com/p4inz-code/kanvaz in your browser';
+    githubBtn.textContent = '打开私人项目仓库';
+    githubBtn.title = '在浏览器中打开私人项目仓库（需有访问权限）';
     githubBtn.onclick = function() {
-      if (typeof KanvazUI !== 'undefined' && KanvazUI.confirmExternalLink) KanvazUI.confirmExternalLink('https://github.com/p4inz-code/kanvaz');
-      else KanvazBridge.openExternal('https://github.com/p4inz-code/kanvaz');
+      if (typeof KanvazUI !== 'undefined' && KanvazUI.confirmExternalLink) KanvazUI.confirmExternalLink('https://github.com/ZNKLEE/Kanvaz-Billfish');
+      else KanvazBridge.openExternal('https://github.com/ZNKLEE/Kanvaz-Billfish');
     };
     box.appendChild(githubBtn);
 

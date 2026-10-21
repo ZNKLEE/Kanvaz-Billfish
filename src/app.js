@@ -134,7 +134,7 @@ var KanvazApp = (function() {
       KanvazBridge.on('update-unsupported', function(info) {
         var els = updateStatusEls();
         var reason = info && info.reason;
-        var releaseUrl = 'https://github.com/p4inz-code/kanvaz/releases/latest';
+        var releaseUrl = 'https://github.com/ZNKLEE/Kanvaz-Billfish/releases/latest';
         if (reason === 'custom') {
           if (els.status) els.status.textContent = 'Custom build: upstream updates disabled';
           if (els.btn) els.btn.disabled = true;
@@ -190,7 +190,7 @@ var KanvazApp = (function() {
         lastProgressMilestone = -1;
         var version = info && info.version;
         var label = 'Kanvaz' + (version ? ' v' + version : '') + ' is available.';
-        var releaseUrl = 'https://github.com/p4inz-code/kanvaz/releases/latest';
+        var releaseUrl = 'https://github.com/ZNKLEE/Kanvaz-Billfish/releases/latest';
 
         var els = updateStatusEls();
         if (els.status) { els.status.style.color = 'var(--color-accent)'; els.status.textContent = label; }

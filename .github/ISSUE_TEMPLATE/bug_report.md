@@ -1,39 +1,39 @@
 ---
-name: Bug Report
-about: Something isn't working as expected
-title: "[Bug] "
+name: 问题反馈
+about: 记录私人使用过程中遇到的问题
+title: "[问题] "
 labels: bug
-assignees: p4inz-code
+assignees: ''
 ---
 
-**Kanvaz version**
-<!-- Find in About screen or run KanvazBoards.getVersion() in DevTools -->
+**软件版本**
+<!-- 在关于界面查看，或在开发者工具运行 KanvazBoards.getVersion() -->
 
 
-**Operating system**
-<!-- e.g. Windows 11 23H2, macOS 14.5 -->
+**操作系统**
+<!-- 例如 Windows 11 23H2、macOS 14.5 -->
 
 
-**Describe the bug**
-<!-- A clear description of what went wrong -->
+**问题描述**
+<!-- 描述出现的问题 -->
 
 
-**Steps to reproduce**
+**复现步骤**
 1. 
 2. 
 3. 
 
-**Expected behavior**
-<!-- What should have happened -->
+**预期结果**
+<!-- 描述期望出现的结果 -->
 
 
-**Screenshots / screen recordings**
-<!-- If applicable — drag and drop images here -->
+**截图或录屏**
+<!-- 如有需要，在此拖入图片 -->
 
 
-**Debug info** *(optional but helpful)*
-<!-- Settings → Developer → Export debug info → paste here -->
+**调试信息（选填）**
+<!-- 设置 → 开发者 → 导出调试信息 → 粘贴到下方 -->
 
 ```
-paste debug info here
+在此粘贴调试信息
 ```

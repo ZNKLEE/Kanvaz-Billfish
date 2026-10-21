@@ -2268,7 +2268,7 @@ var KanvazBoards = (function() {
                "View on GitHub" button, never automatic. */
             row.onclick = function() {
               if (typeof KanvazUI !== 'undefined' && KanvazUI.confirmExternalLink) {
-                KanvazUI.confirmExternalLink('https://github.com/p4inz-code/kanvaz/releases/tag/v' + entry.version);
+                KanvazUI.confirmExternalLink('https://github.com/ZNKLEE/Kanvaz-Billfish/releases/tag/v' + entry.version);
               }
             };
 
@@ -2303,7 +2303,7 @@ var KanvazBoards = (function() {
          then the actual brand name, then the studio/business name last. */
       var footer = document.createElement('div');
       footer.style.cssText = 'flex-shrink:0;padding:0 40px 16px;text-align:center;font-size:11px;color:var(--color-text-3);';
-      footer.textContent = 'Atharva Patil | P4inz | P4inz Interactive Labs';
+      footer.textContent = 'Kanvaz Billfish 中文素材板 · 私人协作维护版';
       rightCol.appendChild(footer);
 
       overlay.appendChild(rightCol);

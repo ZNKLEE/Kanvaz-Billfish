@@ -1,23 +1,25 @@
-## What this PR does
+## 修改目的
 
-<!-- One-liner: what changed and why -->
+<!-- 简述修改内容及原因 -->
 
-## Changes
+## 修改内容
 
-<!-- List the key changes -->
+<!-- 列出主要修改 -->
 - 
 
-## How to test
+## 验证方式
 
-<!-- Steps to verify this works -->
+<!-- 填写验证步骤 -->
 1. `npm start`
 2. 
 
-## Checklist
+## 提交检查
 
-- [ ] `npm run validate` passes clean
-- [ ] No `const`, `let`, arrow functions, or `.forEach()` (ES5 only)
-- [ ] No hardcoded hex colors — uses CSS `--color-*` variables
-- [ ] No inline `onclick` handlers
-- [ ] Tested in both light and dark themes
-- [ ] Screenshots attached (if UI changed)
+- [ ] 相关现有检查已通过
+- [ ] 遵循现有 ES5 界面代码风格
+- [ ] 界面颜色使用 CSS `--color-*` 变量
+- [ ] 不添加内联 `onclick` 事件
+- [ ] 涉及界面时检查深色和浅色主题
+- [ ] 涉及界面时附上截图
+
+- [ ] 新增或修改的界面文字、提示和功能说明使用简体中文

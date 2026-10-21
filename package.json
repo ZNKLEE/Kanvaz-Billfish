@@ -8,12 +8,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/p4inz-code/kanvaz.git"
+    "url": "https://github.com/ZNKLEE/Kanvaz-Billfish.git"
   },
   "bugs": {
-    "url": "https://github.com/p4inz-code/kanvaz/issues"
+    "url": "https://github.com/ZNKLEE/Kanvaz-Billfish/issues"
   },
-  "homepage": "https://github.com/p4inz-code/kanvaz#readme",
+  "homepage": "https://github.com/ZNKLEE/Kanvaz-Billfish",
   "scripts": {
     "start": "electron .",
     "gen:nsis-associations": "node tools/gen-nsis-associations.js",

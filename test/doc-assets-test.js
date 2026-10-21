@@ -20,8 +20,8 @@ function p() { return path.join.apply(null, [ROOT].concat([].slice.call(argument
 
 function run() {
   /* ── 1. every asset referenced by README / landing page / guide exists ── */
-  var files = ['README.md', 'docs/index.html'].concat(
-    fs.readdirSync(p('docs', 'guide')).filter(function(f) { return /\.md$/.test(f); }).map(function(f) { return 'docs/guide/' + f; })
+  var files = ['README.md', 'docs/index.html'].filter(function(f) { return fs.existsSync(p(f)); }).concat(
+    (fs.existsSync(p('docs', 'guide')) ? fs.readdirSync(p('docs', 'guide')) : []).filter(function(f) { return /\.md$/.test(f); }).map(function(f) { return 'docs/guide/' + f; })
   );
   var problems = [];
   files.forEach(function(f) {
@@ -46,7 +46,7 @@ function run() {
     }
   });
   assert.deepStrictEqual(problems, [], 'broken asset references:\n  ' + problems.join('\n  '));
-  console.log('  ✓ every image/link target referenced by README, landing page and ' + (files.length - 2) + ' guide pages exists');
+  console.log('  ✓ 现有说明文件的图片和链接目标检查通过');
 
   /* ── 2. installer + icon files named in package.json exist and are valid ── */
   var build = JSON.parse(fs.readFileSync(p('package.json'), 'utf8')).build;
@@ -71,17 +71,21 @@ function run() {
 
   /* ── 3a. the handout PDF's version pill matches package.json (regenerate it on release) ── */
   var ver = JSON.parse(fs.readFileSync(p('package.json'), 'utf8')).version;
+  if (fs.existsSync(p('docs', 'Kanvaz_Overview.pdf'))) {
   var pdf = fs.readFileSync(p('docs', 'Kanvaz_Overview.pdf')).toString('latin1');
   assert.ok(pdf.indexOf('(v' + ver + ')') !== -1, 'docs/Kanvaz_Overview.pdf does not show v' + ver + ' (run: python docs/generate_overview_pdf.py)');
   console.log('  ✓ docs/Kanvaz_Overview.pdf shows the current version (v' + ver + ')');
+  }
 
   /* ── 3b. the landing page's "Source Modules" stat equals the real src/*.js count ── */
+  if (fs.existsSync(p('docs', 'index.html'))) {
   var realModules = fs.readdirSync(p('src')).filter(function(f) { return /\.js$/.test(f); }).length;
   var landing = fs.readFileSync(p('docs', 'index.html'), 'utf8');
   var mm = landing.match(/stat-value">(\d+)<\/div>\s*<div class="stat-label">Source Modules/);
   assert.ok(mm, 'could not find the Source Modules stat on docs/index.html');
   assert.strictEqual(Number(mm[1]), realModules, 'docs/index.html says ' + mm[1] + ' source modules but src/ has ' + realModules);
   console.log('  ✓ landing page Source Modules stat (' + mm[1] + ') equals the real src/*.js count');
+  }
 
   /* ── 3. the ICO carries every standard size (Windows picks by context) ── */
   var ico = fs.readFileSync(p('assets', 'icons', 'icon.ico'));

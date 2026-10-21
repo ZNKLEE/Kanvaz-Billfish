@@ -1,87 +1,9 @@
-# Contributing to Kanvaz
+# 私人协作说明
 
-Thanks for your interest in contributing to Kanvaz! This document covers the
-rules and workflow for getting your changes merged.
+本仓库仅供本人和受邀朋友共同维护。
 
-## Ground Rules
+从 `main` 创建工作分支，完成修改后提交合并请求。提交说明、合并请求和功能说明使用简体中文；新增或修改的界面文字、提示和报错信息也使用简体中文。
 
-Kanvaz has a **locked tech stack**. These are non-negotiable:
+只修改当前任务涉及的内容，沿用现有代码风格，保留版权及第三方许可证声明。提交前运行与修改相关的现有检查。
 
-| Rule | Details |
-|------|---------|
-| ES5 only | `var` only — no `const`, `let`, arrow functions, or `.forEach()` |
-| Vanilla JS | No frameworks, no transpilers, no bundlers |
-| Vanilla CSS | CSS custom properties are fine; no preprocessors |
-| Electron 22.3.27 | Do not upgrade Electron or electron-builder |
-| No `npm audit fix --force` | The 6 high-severity vulns are build-time only and intentionally tolerated |
-
-The custom linter (`npm run lint`) enforces these rules. If it flags your code,
-fix the code — don't loosen the linter.
-
-## Development Setup
-
-```bash
-git clone https://github.com/p4inz-code/kanvaz.git
-cd kanvaz
-npm install
-npm start
-```
-
-## Before You Submit
-
-Run the full validation suite:
-
-```bash
-npm run validate
-```
-
-This checks syntax (all 16 source files), lint rules, and version consistency.
-Your PR will not be merged if validate fails.
-
-## Version Locations
-
-Kanvaz tracks its version in **6 locked locations**. If your change involves a
-version bump (it probably doesn't — maintainer handles releases), all 6 must
-match:
-
-1. `package.json` → `version`
-2. `src/boards.js` → `VERSION` constant
-3. `src/ui.js` → About dialog version string (×2)
-4. `README.md` → build output filenames
-5. `docs/generate_overview_pdf.py` → footer pill
-
-## Code Style
-
-- IIFE module pattern — each file is a self-contained module
-- `var` for all declarations
-- No inline `onclick` handlers (CSP violation)
-- Use CSS custom properties (`--color-*`) for colors — no hardcoded hex in JS
-- Keep functions short and readable
-- Comments explain *why*, not *what*
-
-## Filing Issues
-
-- **Bug reports**: include your OS, Kanvaz version (About screen or
-  `KanvazBoards.getVersion()` in DevTools), and steps to reproduce. A
-  screenshot or screen recording helps enormously.
-- **Feature requests**: describe the problem you're trying to solve, not just
-  the solution you want.
-
-## Pull Requests
-
-1. Fork the repo and create a branch from `main`
-2. Keep PRs focused — one feature or fix per PR
-3. Run `npm run validate` before pushing
-4. Write a clear PR description: what changed, why, and how to test it
-5. If your PR touches UI, include before/after screenshots
-
-## Architecture
-
-The codebase is 16 source files in `src/`, each wrapped in an IIFE. Boot order
-matters — see `docs/TECHNICAL_OVERVIEW.md` for the module map and dependency
-chain.
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the
-MIT License.
+项目地址：https://github.com/ZNKLEE/Kanvaz-Billfish

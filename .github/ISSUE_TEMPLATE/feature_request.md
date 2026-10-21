@@ -1,22 +1,22 @@
 ---
-name: Feature Request
-about: Suggest an idea for Kanvaz
-title: "[Feature] "
+name: 功能修改
+about: 记录自己和朋友需要修改的功能
+title: "[功能] "
 labels: enhancement
-assignees: p4inz-code
+assignees: ''
 ---
 
-**Problem**
-<!-- What problem does this solve? Describe the frustration or limitation. -->
+**需要解决的问题**
+<!-- 描述具体问题或限制。 -->
 
 
-**Proposed solution**
-<!-- How would you like it to work? -->
+**预期修改**
+<!-- 描述期望的操作方式和结果。 -->
 
 
-**Alternatives considered**
-<!-- Any workarounds you've tried or other approaches worth mentioning -->
+**现有处理方式**
+<!-- 记录已尝试的处理方式。 -->
 
 
-**Context**
-<!-- Are you a VFX artist, 3D artist, designer, or something else? How do you use Kanvaz? This helps prioritize. -->
+**使用场景**
+<!-- 描述实际使用场景。 -->
