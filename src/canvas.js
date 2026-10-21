@@ -1,0 +1,1057 @@
+/* canvas.js — infinite canvas engine */
+
+var KanvazCanvas = (function() {
+
+  /* ── State ── */
+  var container = null;
+  var world = null;
+  var gridCanvas = null;
+  var gridCtx = null;
+
+  var tx = 0;   /* translate X */
+  var ty = 0;   /* translate Y */
+  var scale = 1.0;
+
+  var ZOOM_MIN  = 0.08;
+  var ZOOM_MAX  = 5.0;
+  /* Audit fix: zoom used to be additive (scale +/- a flat 0.10), which
+     makes the perceptual step wildly non-uniform — enormous near
+     ZOOM_MIN (0.18->0.08 halves the board in one notch), invisible near
+     ZOOM_MAX (4.9->5.0 is 2%). It also meant zoom-in and zoom-out
+     weren't exact inverses once either clamp was touched, so 100% could
+     become permanently unreachable (18, 28, ... 98, 108% and never
+     exactly 100 again). Multiplicative factors fix both: scale*FACTOR
+     and scale/FACTOR are always exact inverses, and the perceptual step
+     stays constant across the whole range. */
+  var ZOOM_FACTOR      = 1.1;
+  var ZOOM_FACTOR_FINE = 1.02;
+
+  var isPanning = false;
+  var panMoved = false;
+  var panStartX = 0;
+  var panStartY = 0;
+  var panOriginX = 0;
+  var panOriginY = 0;
+
+  var spaceDown = false;
+
+  /* Marquee (rubber-band) multi-select — Ctrl+left-drag on empty canvas,
+     or a plain left-drag while "V" mode is toggled on (V has no other
+     meaning in Kanvaz; there's no persistent per-tool mode elsewhere in
+     the app, so this is a lightweight momentary/toggle affordance, not
+     a full tool-switching system). */
+  var marqueeModeOn = false;
+  var isMarqueeSelecting = false;
+  var marqueeStartX = 0;
+  var marqueeStartY = 0;
+  var marqueeEl = null;
+
+  /* ── Init ── */
+
+  function init(containerEl, worldEl, gridEl) {
+    container = containerEl;
+    world = worldEl;
+    gridCanvas = gridEl;
+    gridCtx = gridEl.getContext('2d');
+
+    bindEvents();
+    resizeGrid();
+    drawGrid();
+    applyTransform();
+
+    /* Bug fix: "the grid is not at all squares it look rectangle... when
+       side panel opens" — a plain window 'resize' listener only fires
+       when the OS window itself changes size. Opening/closing the side
+       panel (or Properties/Boards/Settings switching width) shrinks or
+       grows this canvas container via flexbox with the window staying
+       exactly the same size — no 'resize' event ever fires, so
+       gridCanvas.width/height (the canvas's actual pixel buffer,
+       resizeGrid()'s job) went stale while the container's CSS box kept
+       changing size out from under it. The browser then stretches the
+       old, now wrong-aspect-ratio bitmap to fill the new box — square
+       grid cells rendered as rectangles. A ResizeObserver on the
+       container itself reacts to ANY layout size change regardless of
+       cause, not just a real window resize. */
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(function() {
+        resizeGrid();
+        drawGrid();
+        if (typeof KanvazScratchBoard !== 'undefined' && KanvazScratchBoard.redraw) KanvazScratchBoard.redraw();
+      }).observe(container);
+    } else {
+      window.addEventListener('resize', function() {
+        resizeGrid();
+        drawGrid();
+        if (typeof KanvazScratchBoard !== 'undefined' && KanvazScratchBoard.redraw) KanvazScratchBoard.redraw();
+      });
+    }
+
+    new MutationObserver(function() {
+      cachedAccentRgb = null;
+      drawGrid();
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  }
+
+  /* Safe-clamp tx/ty to prevent CSS transform overflow.
+     Chromium can handle transforms up to ~16 million px but
+     going past ~5 million causes jank. Also guard NaN/Infinity. */
+  var TX_LIMIT = 5000000;
+
+  function clampTranslate() {
+    if (isNaN(tx) || !isFinite(tx)) tx = 0;
+    if (isNaN(ty) || !isFinite(ty)) ty = 0;
+    if (isNaN(scale) || !isFinite(scale) || scale <= 0) scale = 1.0;
+    if (tx > TX_LIMIT)  tx = TX_LIMIT;
+    if (tx < -TX_LIMIT) tx = -TX_LIMIT;
+    if (ty > TX_LIMIT)  ty = TX_LIMIT;
+    if (ty < -TX_LIMIT) ty = -TX_LIMIT;
+  }
+
+  var gridRafId = null;
+
+  /* Accent-tinted major grid lines, cached — same 1x1-canvas-readback
+     technique getMarqueeFillColor() already uses to turn an arbitrary
+     CSS color string into RGB components without a color-parsing
+     library. Cached because drawGrid() runs every animation frame
+     during pan/zoom; invalidated via a MutationObserver on data-theme
+     rather than chasing every place that attribute gets set (built-in
+     theme toggle in three separate files, plus any plugin-authored
+     theme) — one central invalidation point that can't miss a caller. */
+  var cachedAccentRgb = null;
+
+  function getAccentRgb() {
+    if (cachedAccentRgb) return cachedAccentRgb;
+    var accent = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim();
+    var c = document.createElement('canvas');
+    c.width = 1; c.height = 1;
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = accent || '#7C5CFC';
+    ctx.fillRect(0, 0, 1, 1);
+    var d = ctx.getImageData(0, 0, 1, 1).data;
+    cachedAccentRgb = d[0] + ',' + d[1] + ',' + d[2];
+    return cachedAccentRgb;
+  }
+
+  /* ── Transform ── */
+
+  function applyTransform() {
+    clampTranslate();
+    world.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(' + scale + ')';
+
+    /* Throttle grid redraws — one per animation frame */
+    if (!gridRafId) {
+      gridRafId = requestAnimationFrame(function() {
+        gridRafId = null;
+        drawGrid();
+        /* Scratch Board (9.5.0) — piggybacks on this same throttled rAF
+           slot rather than running its own pan/zoom redraw loop; it's a
+           no-op via its own `if (!active) return` guard whenever Scratch
+           view isn't open. */
+        if (typeof KanvazScratchBoard !== 'undefined' && KanvazScratchBoard.redraw) KanvazScratchBoard.redraw();
+      });
+    }
+    updateStatusBar();
+    updateZoomBtn();
+  }
+
+  function updateZoomBtn() {
+    var btn = document.getElementById('zoom-display');
+    if (btn) btn.textContent = Math.round(scale * 100) + '%';
+  }
+
+  function setZoom(newScale, pivotX, pivotY) {
+    if (pivotX === undefined) {
+      pivotX = container.clientWidth / 2;
+      pivotY = container.clientHeight / 2;
+    }
+
+    var clampedScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newScale));
+    var ratio = clampedScale / scale;
+
+    tx = pivotX - ratio * (pivotX - tx);
+    ty = pivotY - ratio * (pivotY - ty);
+    scale = clampedScale;
+
+    applyTransform();
+  }
+
+  function zoomIn(pivotX, pivotY) {
+    setZoom(scale * ZOOM_FACTOR, pivotX, pivotY);
+  }
+
+  function zoomOut(pivotX, pivotY) {
+    setZoom(scale / ZOOM_FACTOR, pivotX, pivotY);
+  }
+
+  function zoomReset() {
+    tx = 0;
+    ty = 0;
+    scale = 1.0;
+    applyTransform();
+  }
+
+  /* onlyIds (4.9.0, optional) — restrict the fitted bounding box to just
+     these card ids instead of every card on the board. zoomToSelection()
+     below is the only caller that passes it; every existing call site
+     (keyboard shortcut, toolbar button, MCP Bridge's zoomFit tool) is
+     unaffected, since omitting it keeps the original "fit everything"
+     behavior exactly as it was. */
+  function cardBounds(card) {
+    var angle = (card.rotation || 0) * Math.PI / 180;
+    var w = Math.abs(Math.cos(angle)) * card.w + Math.abs(Math.sin(angle)) * card.h;
+    var h = Math.abs(Math.sin(angle)) * card.w + Math.abs(Math.cos(angle)) * card.h;
+    return { x: card.x + card.w / 2 - w / 2, y: card.y + card.h / 2 - h / 2, w: w, h: h };
+  }
+  function zoomFit(onlyIds) {
+    var cards = (typeof KanvazCards !== 'undefined') ? KanvazCards.getAll() : {};
+    var ids = onlyIds && onlyIds.length ? onlyIds : Object.keys(cards);
+
+    if (!ids.length) {
+      tx = 0; ty = 0; scale = 1.0;
+      applyTransform();
+      return;
+    }
+
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < ids.length; i++) {
+      var c = cardBounds(cards[ids[i]]);
+      if (c.x < minX) minX = c.x;
+      if (c.y < minY) minY = c.y;
+      if (c.x + c.w > maxX) maxX = c.x + c.w;
+      if (c.y + c.h > maxY) maxY = c.y + c.h;
+    }
+
+    var pad    = 60;
+    var worldW = maxX - minX + pad * 2;
+    var worldH = maxY - minY + pad * 2;
+    var vw     = container.clientWidth;
+    var vh     = container.clientHeight;
+    var newScale = Math.min(vw / worldW, vh / worldH, ZOOM_MAX);
+    newScale = Math.max(ZOOM_MIN, newScale);
+
+    scale = newScale;
+    tx = (vw / 2) - (minX + worldW / 2 - pad) * scale;
+    ty = (vh / 2) - (minY + worldH / 2 - pad) * scale;
+
+    applyTransform();
+  }
+
+  /* Zoom to selection (4.9.0) — falls back to the normal fit-everything
+     behavior when nothing is selected, rather than a no-op or an error,
+     since "zoom to selection with nothing selected" has an obvious
+     reasonable meaning (there's nothing selection-specific to zoom to). */
+  function zoomToSelection() {
+    var ids = (typeof KanvazCards !== 'undefined' && KanvazCards.getSelectedIds) ? KanvazCards.getSelectedIds() : [];
+    zoomFit(ids);
+  }
+
+  /* View bookmarks (Ctrl+1..9 to save, 1..9 to recall) — Maya/Photoshop-
+     style numbered camera bookmarks. Deliberately session-only (an
+     in-memory object, never written to the board file): the exact same
+     scoping decision this codebase already made for 3D card orbit
+     position ("NOT persisted by design"), and it sidesteps any board
+     file schema/migration question entirely. A bookmark simply stops
+     existing once the board is closed or reloaded. */
+  var viewBookmarks = {};
+
+  function saveViewBookmark(slot) {
+    viewBookmarks[slot] = { tx: tx, ty: ty, scale: scale };
+    if (typeof KanvazUI !== 'undefined') KanvazUI.toast('View ' + slot + ' saved');
+  }
+
+  function recallViewBookmark(slot) {
+    var v = viewBookmarks[slot];
+    if (!v) {
+      if (typeof KanvazUI !== 'undefined') KanvazUI.toast('No view saved for ' + slot + ' — Ctrl+' + slot + ' to save one', 'error');
+      return;
+    }
+    setViewport(v.tx, v.ty, v.scale);
+  }
+
+  function panBy(dx, dy) {
+    tx += dx;
+    ty += dy;
+    applyTransform();
+  }
+
+  function panTo(x, y) {
+    tx = x;
+    ty = y;
+    applyTransform();
+  }
+
+  /* Direct feedback: "when in 3d mode if user has zoomed a lot how
+     will he move even if he focuses to card since 3d is interactive...
+     add something like ctrl and middle mouse." Real gap: a 3D model
+     card's OrbitControls-driven viewport calls e.stopPropagation() on
+     every mousedown (cards.js), including Alt+drag — the one gesture
+     this app already uses to pan from ANYWHERE, even over a card, for
+     every other card type. Worse, OrbitControls binds its own listener
+     directly to the inner <canvas> element, which always fires before
+     anything registered on an ancestor in the bubble phase — a plain
+     bubble-phase override on the viewport can never win that race.
+     This is the escape hatch: cards.js's 3D card setup calls it from
+     its OWN capture-phase mousedown listener (capture always resolves
+     on ancestors before the target's own listeners, bubble or capture,
+     ever run — the one ordering that actually lets an ancestor
+     pre-empt OrbitControls) for Alt+drag or Ctrl/Cmd+middle-mouse
+     specifically, so a plain middle-mouse click still reaches
+     OrbitControls for its own dolly/zoom, matching the professional-
+     3D-viewport convention that already exists. Sets up the exact same
+     state init()'s own mousedown handler does for a normal pan, so the
+     existing mousemove/mouseup listeners there drive the rest of the
+     gesture — no separate pan implementation to maintain. */
+  function startExternalPan(clientX, clientY) {
+    isPanning = true;
+    panStartX = clientX;
+    panStartY = clientY;
+    panOriginX = tx;
+    panOriginY = ty;
+    panMoved = false;
+    if (container) container.classList.add('grabbing');
+  }
+
+  /* Audit fix: board load/switch used to call panTo(savedTx, savedTy)
+     then setZoom(savedScale) — but setZoom's pivot math REWRITES tx/ty
+     based on the ratio between the CURRENT scale (whatever the previous
+     board happened to be at) and the new one, immediately overwriting
+     the pan just restored. The board would land somewhere else on
+     screen every time, and how far off depended on whichever board you
+     switched from. Assign all three in one shot, no pivot math. */
+  function setViewport(x, y, newScale) {
+    tx = x;
+    ty = y;
+    scale = (isFinite(newScale) && newScale > 0) ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newScale)) : 1.0;
+    applyTransform();
+  }
+
+  /* ── Grid drawing ── */
+
+  function resizeGrid() {
+    gridCanvas.width = container.clientWidth;
+    gridCanvas.height = container.clientHeight;
+  }
+
+  function getGridStyle() {
+    if (typeof KanvazUI_Extended !== 'undefined' && KanvazUI_Extended.getSettings) {
+      var s = KanvazUI_Extended.getSettings();
+      if (s && s.gridStyle) return s.gridStyle;
+    }
+    return 'reference';
+  }
+
+  /* Game Dev grid — a single uniform tier, no major/minor blending, at
+     a bigger base cell (32px world units, matching common sprite/tile
+     sizes) — a clean, high-contrast alignment surface for pixel/tile
+     work rather than the reference grid's "designed" multi-tier look. */
+  function drawGameDevGrid(w, h, alpha, isLight) {
+    var baseSpacing = 32;
+    var spacing = baseSpacing * scale;
+    var ox = ((tx % spacing) + spacing) % spacing;
+    var oy = ((ty % spacing) + spacing) % spacing;
+
+    var fade = 1.0;
+    if (spacing < 6) fade = Math.max(0, (spacing - 3) / (6 - 3));
+    var lineAlpha = (isLight ? 0.24 : 0.22) * alpha * fade;
+    if (fade <= 0.01) return;
+
+    var lineColor = isLight ? '0, 0, 0' : '255, 255, 255';
+    gridCtx.lineWidth = 1;
+    gridCtx.strokeStyle = 'rgba(' + lineColor + ', ' + lineAlpha + ')';
+    gridCtx.beginPath();
+    var x = ox;
+    while (x < w) {
+      gridCtx.moveTo(x + 0.5, 0);
+      gridCtx.lineTo(x + 0.5, h);
+      x += spacing;
+    }
+    var y = oy;
+    while (y < h) {
+      gridCtx.moveTo(0, y + 0.5);
+      gridCtx.lineTo(w, y + 0.5);
+      y += spacing;
+    }
+    gridCtx.stroke();
+
+    /* A bolder line every 8th cell (a common tile-sheet/chunk grouping)
+       so a large tilemap still has some coarser structure to read by,
+       same idea as the reference grid's major tier, just less busy. */
+    var chunkSpacing = spacing * 8;
+    if (chunkSpacing >= 24) {
+      var cox = ((tx % chunkSpacing) + chunkSpacing) % chunkSpacing;
+      var coy = ((ty % chunkSpacing) + chunkSpacing) % chunkSpacing;
+      gridCtx.strokeStyle = 'rgba(' + lineColor + ', ' + Math.min(1, lineAlpha * 2.2) + ')';
+      gridCtx.beginPath();
+      var cx = cox;
+      while (cx < w) {
+        gridCtx.moveTo(cx + 0.5, 0);
+        gridCtx.lineTo(cx + 0.5, h);
+        cx += chunkSpacing;
+      }
+      var cy = coy;
+      while (cy < h) {
+        gridCtx.moveTo(0, cy + 0.5);
+        gridCtx.lineTo(w, cy + 0.5);
+        cy += chunkSpacing;
+      }
+      gridCtx.stroke();
+    }
+  }
+
+  /* 3D-style origin axes — the red/green X/Y convention most 3D
+     modeling software uses for its ground-plane grid, drawn on top of
+     the normal reference grid so a 3D-reference board has a clear
+     "center of the world" to align/mirror against. Only ever visible
+     when the origin is actually within the current viewport — a plain
+     canvas line drawn outside 0..w/0..h simply doesn't appear, no
+     extra visibility check needed. */
+  function drawOriginAxes(w, h, alpha) {
+    var originX = tx;
+    var originY = ty;
+
+    gridCtx.lineWidth = 1.5;
+
+    gridCtx.strokeStyle = 'rgba(226, 59, 59, ' + (0.55 * alpha) + ')';
+    gridCtx.beginPath();
+    gridCtx.moveTo(0, originY + 0.5);
+    gridCtx.lineTo(w, originY + 0.5);
+    gridCtx.stroke();
+
+    gridCtx.strokeStyle = 'rgba(59, 165, 92, ' + (0.55 * alpha) + ')';
+    gridCtx.beginPath();
+    gridCtx.moveTo(originX + 0.5, 0);
+    gridCtx.lineTo(originX + 0.5, h);
+    gridCtx.stroke();
+  }
+
+  function drawGrid() {
+    /* Audit fix: applySettings() (ui.js) now calls this directly on
+       every settings load/change, including the very first one, which
+       resolves asynchronously over IPC — normally well after
+       KanvazCanvas.init() has already run synchronously during
+       startup, but not something to leave provably unguarded when the
+       fix is one line. Map View's equivalent (resizeMapGrid) already
+       guards the same way. */
+    if (!gridCanvas || !gridCtx) return;
+    var w = gridCanvas.width;
+    var h = gridCanvas.height;
+
+    gridCtx.clearRect(0, 0, w, h);
+
+    var baseSpacing = 24;
+    var spacing = baseSpacing * scale;
+
+    /* Fade grid at extreme zoom levels.
+       Audit fix (4.7.0): the low end used to fade linearly down to
+       exactly 0 AT ZOOM_MIN — meaning the grid vanished completely
+       right as you reached the most-zoomed-out view, exactly when
+       having some spatial reference matters most for a large board.
+       Fading toward a floor BELOW ZOOM_MIN instead means alpha never
+       actually reaches 0 within the reachable zoom range — the grid
+       stays faintly visible everywhere the user can actually zoom to.
+       The separate density-based minorFade/majorFade below (screen-
+       space line spacing, not raw scale) still handles the "lines too
+       close together look like a solid wash" problem on its own — this
+       change only affects the extreme-zoom-out zero-out, not that. */
+    /* Direct feedback: the grid should "still be visible when more zoom
+       and more zoom out" — the top end used to fade linearly to a true
+       0 exactly AT ZOOM_MAX, same shape as the low-end bug already
+       fixed once above. Same fix, same reasoning: floor it below full
+       transparency instead of letting it reach 0 within the reachable
+       range. */
+    var GRID_FADE_FLOOR = ZOOM_MIN * 0.5;
+    var GRID_FADE_FLOOR_HIGH = 0.35;
+    var alpha = 1.0;
+    if (scale < 0.25) alpha = (scale - GRID_FADE_FLOOR) / (0.25 - GRID_FADE_FLOOR);
+    if (scale > 3.0)  alpha = 1.0 - (1.0 - GRID_FADE_FLOOR_HIGH) * (scale - 3.0) / (ZOOM_MAX - 3.0);
+    alpha = Math.max(0, Math.min(1, alpha));
+
+    if (alpha <= 0) return;
+
+    var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    var gridStyle = getGridStyle();
+
+    /* Game Dev grid is a completely different, single-tier layout —
+       handled entirely by its own function rather than threaded through
+       every branch below. */
+    if (gridStyle === 'gamedev') {
+      drawGameDevGrid(w, h, alpha, isLight);
+      return;
+    }
+
+    /* Origin offset so grid moves with pan */
+    var ox = ((tx % spacing) + spacing) % spacing;
+    var oy = ((ty % spacing) + spacing) % spacing;
+
+    var lineColor = isLight ? '0, 0, 0' : '255, 255, 255';
+    var minorAlpha = (isLight ? 0.10 : 0.09) * alpha;
+    var majorAlpha = (isLight ? 0.22 : 0.20) * alpha;
+
+    /* Major/minor line grid (same treatment as Map View) — a bolder
+       line every 5th cell instead of a uniform dot field. */
+    var MAJOR_EVERY = 5;
+    var majorSpacing = spacing * MAJOR_EVERY;
+    var majorOx = ((tx % majorSpacing) + majorSpacing) % majorSpacing;
+    var majorOy = ((ty % majorSpacing) + majorSpacing) % majorSpacing;
+
+    /* Density fade — lines packed closer than ~12-24px apart visually
+       merge (anti-aliased edges overlap) into a wash that looked like
+       the grid "going white" when zooming out. Fade each line type out
+       smoothly as its own spacing approaches that merge threshold,
+       instead of drawing at full alpha right up until an abrupt cutoff.
+       Verified empirically (measured pixel brightness across the full
+       zoom range) before landing on these thresholds. */
+    var minorFade = 1.0;
+    if (spacing < 20) minorFade = Math.max(0, (spacing - 12) / (20 - 12));
+    minorAlpha *= minorFade;
+
+    var majorFade = 1.0;
+    if (majorSpacing < 40) majorFade = Math.max(0, (majorSpacing - 24) / (40 - 24));
+    majorAlpha *= majorFade;
+
+    /* A third, coarser tier (every 25th cell — 5x the major spacing) so
+       zooming out a lot doesn't just fade the whole grid to nothing once
+       minor/major lines get too dense to draw. At ZOOM_MIN this tier's
+       on-screen spacing stays comfortably above its own density-fade
+       threshold, so there's always at least one visible reference grid
+       no matter how far out you go — same idea a map application uses
+       to swap in coarser tiles as you zoom out, rather than just
+       drawing less. */
+    var SUPER_MAJOR_EVERY = 25;
+    var superMajorSpacing = spacing * SUPER_MAJOR_EVERY;
+    var superMajorOx = ((tx % superMajorSpacing) + superMajorSpacing) % superMajorSpacing;
+    var superMajorOy = ((ty % superMajorSpacing) + superMajorSpacing) % superMajorSpacing;
+    var superMajorAlpha = (isLight ? 0.30 : 0.28) * alpha;
+    var superMajorFade = 1.0;
+    if (superMajorSpacing < 40) superMajorFade = Math.max(0, (superMajorSpacing - 24) / (40 - 24));
+    superMajorAlpha *= superMajorFade;
+
+    gridCtx.lineWidth = 1;
+
+    if (minorFade > 0.01) {
+      gridCtx.strokeStyle = 'rgba(' + lineColor + ', ' + minorAlpha + ')';
+      gridCtx.beginPath();
+      var x = ox;
+      while (x < w) {
+        gridCtx.moveTo(x + 0.5, 0);
+        gridCtx.lineTo(x + 0.5, h);
+        x += spacing;
+      }
+      var y = oy;
+      while (y < h) {
+        gridCtx.moveTo(0, y + 0.5);
+        gridCtx.lineTo(w, y + 0.5);
+        y += spacing;
+      }
+      gridCtx.stroke();
+    }
+
+    if (superMajorFade > 0.01) {
+      var superAccentRgb = getAccentRgb();
+      gridCtx.strokeStyle = 'rgba(' + superAccentRgb + ', ' + (superMajorAlpha * 0.85) + ')';
+      gridCtx.beginPath();
+      var sx = superMajorOx;
+      while (sx < w) {
+        gridCtx.moveTo(sx + 0.5, 0);
+        gridCtx.lineTo(sx + 0.5, h);
+        sx += superMajorSpacing;
+      }
+      var sy = superMajorOy;
+      while (sy < h) {
+        gridCtx.moveTo(0, sy + 0.5);
+        gridCtx.lineTo(w, sy + 0.5);
+        sy += superMajorSpacing;
+      }
+      gridCtx.stroke();
+    }
+
+    if (majorFade > 0.01) {
+      /* Major lines carry a faint accent tint rather than plain gray —
+         the same brand color used everywhere else in the app (selection
+         rings, active states), just at a low enough alpha to stay a
+         quiet structural cue instead of competing with card content. */
+      var accentRgb = getAccentRgb();
+      gridCtx.strokeStyle = 'rgba(' + accentRgb + ', ' + (majorAlpha * 0.85) + ')';
+      gridCtx.beginPath();
+      var mx = majorOx;
+      while (mx < w) {
+        gridCtx.moveTo(mx + 0.5, 0);
+        gridCtx.lineTo(mx + 0.5, h);
+        mx += majorSpacing;
+      }
+      var my = majorOy;
+      while (my < h) {
+        gridCtx.moveTo(0, my + 0.5);
+        gridCtx.lineTo(w, my + 0.5);
+        my += majorSpacing;
+      }
+      gridCtx.stroke();
+
+      /* Small accent dots at major-line intersections — a CAD-style
+         anchor point at every 5th cell, reinforcing the grid as a real
+         measuring surface instead of a flat tiled texture. Same fade as
+         the lines they mark, so they never outlive the lines around
+         them at extreme zoom. */
+      var dotAlpha = majorAlpha * 1.3;
+      gridCtx.fillStyle = 'rgba(' + accentRgb + ', ' + Math.min(1, dotAlpha) + ')';
+      var dotR = Math.min(1.6, 1 + scale * 0.15);
+      var dy = majorOy;
+      while (dy < h) {
+        var dx = majorOx;
+        while (dx < w) {
+          gridCtx.beginPath();
+          gridCtx.arc(dx, dy, dotR, 0, Math.PI * 2);
+          gridCtx.fill();
+          dx += majorSpacing;
+        }
+        dy += majorSpacing;
+      }
+    }
+
+    if (gridStyle === '3d') {
+      drawOriginAxes(w, h, alpha);
+    }
+  }
+
+  /* ── Events ── */
+
+  function bindEvents() {
+    /* Scroll to zoom */
+    container.addEventListener('wheel', function(e) {
+      e.preventDefault();
+
+      /* Audit fix: a plain `else` branch here treated ANY non-negative
+         deltaY as "zoom out" — including deltaY === 0, which is exactly
+         what a horizontal scroll (Shift+wheel, or a trackpad's
+         horizontal swipe) reports. That silently zoomed the canvas OUT
+         on a gesture with no vertical intent at all. Explicitly no-op
+         on zero. */
+      if (e.deltaY === 0) return;
+
+      var rect = container.getBoundingClientRect();
+      var pivotX = e.clientX - rect.left;
+      var pivotY = e.clientY - rect.top;
+
+      /* Direct feedback: Mac users press Cmd, not physical Ctrl, for
+         this app's other "held modifier" shortcuts (shortcuts.js's own
+         dispatcher already treats e.ctrlKey||e.metaKey as one "ctrl"
+         concept everywhere) — this was the one place in the app that
+         checked ctrlKey alone, so Cmd+Scroll silently fell back to the
+         coarse zoom factor on Mac instead of the fine one. */
+      var factor = (e.ctrlKey || e.metaKey) ? ZOOM_FACTOR_FINE : ZOOM_FACTOR;
+      /* Magnitude-aware: a precision trackpad emits many small-delta
+         events per gesture where a mouse wheel emits few large-delta
+         ones — scaling the exponent by deltaY means a gentle swipe
+         moves the zoom gently instead of applying a full step per
+         event regardless of how small the actual input was. */
+      var exponent = -e.deltaY / 100;
+      var newScale = scale * Math.pow(factor, exponent);
+
+      setZoom(newScale, pivotX, pivotY);
+    }, { passive: false });
+
+    /* Panning — middle mouse, space+drag, or left-drag on empty canvas.
+       Ctrl+left-drag (or plain left-drag while marqueeModeOn) takes
+       priority over the default left-drag-pans-canvas behavior — a
+       marquee selection box needs the same gesture pan already claims,
+       so it has to be checked and excluded first. */
+    /* Real bug found via live user audit: "when I click outside the
+       card area it doesn't exit edit mode." Root cause: clicking on
+       empty canvas always calls e.preventDefault() below (needed so
+       the click starts a pan-drag or marquee-select instead of, say,
+       the browser trying to select page text) — but preventDefault()
+       on mousedown also suppresses the browser's own default focus-
+       shift behavior, which is what would otherwise blur whatever
+       textarea/input a card left focused. Clicking a DIFFERENT card
+       already works fine (cards.js's own mousedown handler never calls
+       preventDefault for a plain card click), so this is scoped
+       specifically to the empty-canvas case. */
+    function blurActiveEditIfAny() {
+      var ae = document.activeElement;
+      if (ae && ae !== document.body &&
+          (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.isContentEditable)) {
+        ae.blur();
+      }
+    }
+
+    container.addEventListener('mousedown', function(e) {
+      /* Bug fix (9.5.0, found live): with a Scratch Board drawing tool
+         armed, #scratch-strokes-canvas sits above everything (z-index
+         100000, pointer-events:auto) and correctly gets the mousedown
+         first — but this listener is on the ANCESTOR #canvas-container,
+         so the same event still bubbles up here right after, and nothing
+         stopped it from ALSO starting a pan/marquee-select underneath the
+         stroke being drawn. The user felt this as "the arrow tool pans
+         the screen instead of drawing" — both were actually happening at
+         once, and the pan's continuous tx/ty changes (which strokes are
+         re-projected through on every redraw) are what made the drawn
+         stroke look like it never landed. Bailing out here whenever a
+         Scratch tool is armed leaves the event to strokeCanvas's own
+         listener alone, exactly like any other tool-armed state (e.g.
+         per-card annotate.js) already takes over the canvas exclusively
+         while active. */
+      /* Found live AGAIN, after the first fix above: that guard blocked
+         EVERY button, including middle-mouse — but middle-mouse-drag-to-
+         pan is a universal "always works, no matter what tool is active"
+         convention (Blender, Photoshop, Figma, Illustrator all do this),
+         and scratch-board.js's own pointerdown handler already ignores
+         anything but the left button (e.button !== 0 bails out there) —
+         so a middle-mouse press was reaching neither drawing NOR panning,
+         just dead. Only the LEFT button actually needs blocking here
+         (that's the button a Scratch tool draws with); middle stays
+         exempt so it can always pan regardless of the armed tool. */
+      if (typeof KanvazScratchBoard !== 'undefined' && KanvazScratchBoard.isToolArmed && KanvazScratchBoard.isToolArmed() && e.button === 0) return;
+
+      var isEmptyTarget = (e.target === container || e.target === world || e.target === gridCanvas);
+
+      if (e.button === 0 && isEmptyTarget && (e.ctrlKey || e.metaKey || marqueeModeOn)) {
+        e.preventDefault();
+        blurActiveEditIfAny();
+        startMarquee(e.clientX, e.clientY);
+        return;
+      }
+
+      var leftDragEnabled = true;
+      if (typeof KanvazUI_Extended !== 'undefined') {
+        var s = KanvazUI_Extended.getSettings();
+        leftDragEnabled = !s || s.leftDragPan !== false;
+      }
+
+      /* Direct feedback: "add pan control like alt + drag left mb, take
+         reference from maya" — Alt+left-drag pans from anywhere,
+         including over a card, not just empty canvas (cards.js's own
+         mousedown handler bails out early on e.altKey specifically so
+         this reaches here instead of starting a card drag/resize). */
+      var shouldPan = (e.button === 1)
+        || (e.button === 0 && spaceDown)
+        || (e.button === 0 && e.altKey)
+        || (e.button === 0 && isEmptyTarget && leftDragEnabled);
+
+      if (shouldPan) {
+        e.preventDefault();
+        blurActiveEditIfAny();
+        isPanning = true;
+        panStartX = e.clientX;
+        panStartY = e.clientY;
+        panOriginX = tx;
+        panOriginY = ty;
+        panMoved = false;
+        container.classList.add('grabbing');
+      }
+    });
+
+    window.addEventListener('mousemove', function(e) {
+      if (isMarqueeSelecting) { updateMarquee(e.clientX, e.clientY); return; }
+      if (!isPanning) return;
+      var dx = e.clientX - panStartX;
+      var dy = e.clientY - panStartY;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) panMoved = true;
+      tx = panOriginX + dx;
+      ty = panOriginY + dy;
+      applyTransform();
+    });
+
+    window.addEventListener('mouseup', function(e) {
+      if (isMarqueeSelecting) { finishMarquee(e.clientX, e.clientY); return; }
+      if (isPanning) {
+        isPanning = false;
+        container.classList.remove('grabbing');
+        if (spaceDown) container.classList.add('grab');
+
+        /* Left-click on empty canvas without drag = deselect all */
+        if (e.button === 0 && !panMoved && typeof KanvazCards !== 'undefined') {
+          KanvazCards.deselectAll();
+        }
+      }
+    });
+
+    /* Space key for pan mode */
+    window.addEventListener('keydown', function(e) {
+      if (e.code === 'Space' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') {
+        if (!spaceDown) {
+          spaceDown = true;
+          container.classList.add('grab');
+        }
+        e.preventDefault();
+      }
+    });
+
+    window.addEventListener('keyup', function(e) {
+      if (e.code === 'Space') {
+        spaceDown = false;
+        if (!isPanning) container.classList.remove('grab');
+      }
+    });
+
+    /* "V" toggles marquee-select mode — a plain left-drag on empty
+       canvas then draws a selection box instead of panning, without
+       needing to hold Ctrl every time. Same text-input guard every
+       other bare-letter shortcut in this app uses. Escape (handled in
+       ui.js's closeAll(), which calls setMarqueeMode(false)) also exits
+       it, same convention as every other modal-ish state in this app. */
+    window.addEventListener('keydown', function(e) {
+      if ((e.key === 'v' || e.key === 'V') && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'INPUT') {
+        /* Bug fix (found live): "V" while Scratch Board is open did
+           nothing useful — Board view's own marquee-select toggle below
+           doesn't mean anything there (Scratch's own canvas-authority
+           model, not Board's selection system, is what's active). The
+           user's own request: V should flip between Select (canvas acts
+           like Board view) and the last drawing tool, from WITHIN
+           Scratch view — that's a completely different toggle, owned by
+           scratch-board.js, so it takes "V" over entirely while Scratch
+           is active instead of falling through to marquee mode. */
+        if (typeof KanvazScratchBoard !== 'undefined' && KanvazScratchBoard.isActive()) {
+          KanvazScratchBoard.toggleSelectTool();
+          return;
+        }
+        setMarqueeMode(!marqueeModeOn);
+      }
+    });
+
+    /* Number-key tool shortcuts, Scratch Board only, V already covers
+       Select — 1-7 map onto TOOLS in its declared order (Pen, Highlighter,
+       Line, Arrow, Rectangle, Ellipse, Eraser), matching the toolbar's own
+       left-to-right layout so the number matches what the user sees.
+       Same text-input guard as every other bare-key shortcut. */
+    window.addEventListener('keydown', function(e) {
+      if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+      if (typeof KanvazScratchBoard === 'undefined' || !KanvazScratchBoard.isActive()) return;
+      var n = parseInt(e.key, 10);
+      if (n >= 1 && n <= 7 && KanvazScratchBoard.TOOLS[n - 1]) {
+        e.preventDefault();
+        KanvazScratchBoard.setTool(KanvazScratchBoard.TOOLS[n - 1]);
+      }
+    });
+
+    /* Double-click canvas to create note — opt-in via Settings (off by default) */
+    container.addEventListener('dblclick', function(e) {
+      if (e.target === container || e.target === world || e.target === gridCanvas) {
+        var enabled = false;
+        if (typeof KanvazUI_Extended !== 'undefined') {
+          var s = KanvazUI_Extended.getSettings();
+          enabled = s && s.doubleClickCreatesNote === true;
+        }
+        if (!enabled) return;
+        if (typeof KanvazCards !== 'undefined') {
+          var pos = screenToWorld(e.clientX, e.clientY);
+          KanvazCards.createNote(pos.x, pos.y);
+        }
+      }
+    });
+
+    /* Right-click on canvas */
+    container.addEventListener('contextmenu', function(e) {
+      if (e.target === container || e.target === world || e.target === gridCanvas) {
+        e.preventDefault();
+        if (typeof KanvazUI !== 'undefined') {
+          KanvazUI.showContextMenu(e.clientX, e.clientY, 'canvas', null);
+        }
+      }
+    });
+  }
+
+  function setMarqueeMode(on) {
+    marqueeModeOn = !!on;
+    if (container) container.classList.toggle('marquee-mode', marqueeModeOn);
+    if (typeof KanvazUI !== 'undefined' && KanvazUI.toast) {
+      KanvazUI.toast(marqueeModeOn ? 'Selection mode on — drag to box-select (V or Esc to exit)' : 'Selection mode off');
+    }
+  }
+
+  /* Resolves whatever format --color-accent happens to be (hex/rgb/hsl/
+     named — themes and plugin themes aren't guaranteed to use any one
+     of these) into an rgba() string at a fixed low alpha, via a 1x1
+     canvas readback — the one reliable, format-agnostic way to parse an
+     arbitrary CSS color string in JS without a real color-parsing
+     library. Recomputed on every marquee start rather than cached, so a
+     theme switch is always reflected immediately — this only runs once
+     per drag, not per mousemove, so there's no real cost to not caching
+     it. */
+  function getMarqueeFillColor() {
+    var accent = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim();
+    var c = document.createElement('canvas');
+    c.width = 1; c.height = 1;
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = accent || '#7C5CFC';
+    ctx.fillRect(0, 0, 1, 1);
+    var d = ctx.getImageData(0, 0, 1, 1).data;
+    return 'rgba(' + d[0] + ',' + d[1] + ',' + d[2] + ',0.12)';
+  }
+
+  function startMarquee(clientX, clientY) {
+    isMarqueeSelecting = true;
+    marqueeStartX = clientX;
+    marqueeStartY = clientY;
+    if (!marqueeEl) {
+      marqueeEl = document.createElement('div');
+      marqueeEl.id = 'marquee-select-box';
+      document.body.appendChild(marqueeEl);
+    }
+    marqueeEl.style.left = clientX + 'px';
+    marqueeEl.style.top = clientY + 'px';
+    marqueeEl.style.width = '0px';
+    marqueeEl.style.height = '0px';
+    marqueeEl.style.background = getMarqueeFillColor();
+    marqueeEl.style.display = 'block';
+  }
+
+  /* Tracked in raw screen/client coordinates (not world) — the box is a
+     fixed-position screen overlay, so it needs to visually stay put
+     under the cursor regardless of the board's own pan/zoom; conversion
+     to world space only happens once, in finishMarquee, for the actual
+     card-intersection test. */
+  function updateMarquee(clientX, clientY) {
+    var left = Math.min(marqueeStartX, clientX);
+    var top = Math.min(marqueeStartY, clientY);
+    var w = Math.abs(clientX - marqueeStartX);
+    var h = Math.abs(clientY - marqueeStartY);
+    marqueeEl.style.left = left + 'px';
+    marqueeEl.style.top = top + 'px';
+    marqueeEl.style.width = w + 'px';
+    marqueeEl.style.height = h + 'px';
+  }
+
+  function finishMarquee(clientX, clientY) {
+    isMarqueeSelecting = false;
+    if (marqueeEl) marqueeEl.style.display = 'none';
+
+    /* A click with no real drag (box smaller than a few px) is a plain
+       click, not a selection attempt — matches the existing "click
+       empty canvas = deselect" convention below rather than selecting
+       nothing via an accidental zero-size box. */
+    if (Math.abs(clientX - marqueeStartX) < 3 && Math.abs(clientY - marqueeStartY) < 3) {
+      if (typeof KanvazCards !== 'undefined') KanvazCards.deselectAll();
+      return;
+    }
+
+    var p1 = screenToWorld(marqueeStartX, marqueeStartY);
+    var p2 = screenToWorld(clientX, clientY);
+    var boxX1 = Math.min(p1.x, p2.x);
+    var boxY1 = Math.min(p1.y, p2.y);
+    var boxX2 = Math.max(p1.x, p2.x);
+    var boxY2 = Math.max(p1.y, p2.y);
+
+    if (typeof KanvazCards === 'undefined') return;
+    var all = KanvazCards.getAll();
+    var hitIds = [];
+    for (var id in all) {
+      var c = cardBounds(all[id]);
+      var cardIntersects = c.x < boxX2 && (c.x + c.w) > boxX1 && c.y < boxY2 && (c.y + c.h) > boxY1;
+      if (cardIntersects) hitIds.push(id);
+    }
+    KanvazCards.setMultiSelection(hitIds);
+  }
+
+  /* ── Coordinate conversion ── */
+
+  function screenToWorld(sx, sy) {
+    var rect = container.getBoundingClientRect();
+    return {
+      x: (sx - rect.left - tx) / scale,
+      y: (sy - rect.top  - ty) / scale
+    };
+  }
+
+  function worldToScreen(wx, wy) {
+    var rect = container.getBoundingClientRect();
+    return {
+      x: wx * scale + tx + rect.left,
+      y: wy * scale + ty + rect.top
+    };
+  }
+
+  /* ── Status bar update ── */
+
+  function updateStatusBar() {
+    var zoomEl = document.getElementById('status-zoom');
+    var posEl  = document.getElementById('status-pos');
+
+    if (zoomEl) {
+      zoomEl.textContent = Math.round(scale * 100) + '%';
+    }
+
+    if (posEl) {
+      var cx = Math.round(-tx / scale);
+      var cy = Math.round(-ty / scale);
+      posEl.textContent = cx + ', ' + cy;
+    }
+  }
+
+  /* ── Drop handling ── */
+
+  function initDrop(onFiles) {
+    var overlay = document.getElementById('drop-overlay');
+
+    container.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (overlay) overlay.classList.add('visible');
+    });
+
+    container.addEventListener('dragleave', function(e) {
+      if (e.relatedTarget && container.contains(e.relatedTarget)) return;
+      if (overlay) overlay.classList.remove('visible');
+    });
+
+    container.addEventListener('drop', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (overlay) overlay.classList.remove('visible');
+
+      var files = e.dataTransfer.files;
+      if (!files || !files.length) return;
+
+      var worldPos = screenToWorld(e.clientX, e.clientY);
+
+      var fileArray = [];
+      for (var i = 0; i < files.length; i++) {
+        fileArray.push(files[i]);
+      }
+
+      if (typeof onFiles === 'function') {
+        onFiles(fileArray, worldPos);
+      }
+    });
+  }
+
+  /* ── Viewport info for minimap ── */
+
+  function getViewport() {
+    return {
+      tx: tx,
+      ty: ty,
+      scale: scale,
+      width: container ? container.clientWidth : 0,
+      height: container ? container.clientHeight : 0
+    };
+  }
+
+  /* ── Public API ── */
+
+  return {
+    init:           init,
+    setZoom:        setZoom,
+    zoomIn:         zoomIn,
+    zoomOut:        zoomOut,
+    zoomReset:      zoomReset,
+    zoomFit:        zoomFit,
+    zoomToSelection: zoomToSelection,
+    saveViewBookmark: saveViewBookmark,
+    recallViewBookmark: recallViewBookmark,
+    panBy:          panBy,
+    panTo:          panTo,
+    startExternalPan: startExternalPan,
+    setViewport:    setViewport,
+    initDrop:       initDrop,
+    screenToWorld:  screenToWorld,
+    worldToScreen:  worldToScreen,
+    getViewport:    getViewport,
+    getScale:       function() { return scale; },
+    getTx:          function() { return tx; },
+    getTy:          function() { return ty; },
+    drawGrid:       drawGrid,
+    setMarqueeMode: setMarqueeMode,
+    isMarqueeModeOn: function() { return marqueeModeOn; }
+  };
+
+})();

@@ -1,0 +1,86 @@
+[
+  {
+    "id": "filmmaking",
+    "name": "Filmmaking",
+    "description": "Shot references, mood, and a starter color palette for a film/VFX board.",
+    "file": "filmmaking.json"
+  },
+  {
+    "id": "game-art",
+    "name": "Game Art",
+    "description": "Concept art, style references, and a palette section for a game-art board.",
+    "file": "game-art.json"
+  },
+  {
+    "id": "mood-board",
+    "name": "Mood Board",
+    "description": "A loose, freeform layout for general inspiration gathering.",
+    "file": "mood-board.json"
+  },
+  {
+    "id": "vfx-beginner",
+    "name": "VFX — Beginner",
+    "description": "A first real pipeline: plate prep, a proper roto/key/track/comp order of operations, and the exact mistakes that give away a beginner comp.",
+    "file": "vfx-beginner.json"
+  },
+  {
+    "id": "vfx-intermediate",
+    "name": "VFX — Intermediate",
+    "description": "Real shot-based tracking for a small crew or freelance pipeline: bidding logic, a proper shot-status board, and the comp-script discipline that keeps ten shots from turning into chaos.",
+    "file": "vfx-intermediate.json"
+  },
+  {
+    "id": "vfx-professional",
+    "name": "VFX — Professional Pipeline",
+    "description": "A studio-scale sequence board across every department — bid through dailies to final delivery — laid out the way a real production tracks a show, not a simplified version of it.",
+    "file": "vfx-professional.json"
+  },
+  {
+    "id": "game-dev",
+    "name": "Game Dev — Concept to Production",
+    "description": "The real pre-production sequence — pillars before pixels, greybox before final art — plus the technical budget conversation that saves a re-do three months in.",
+    "file": "game-dev.json"
+  },
+  {
+    "id": "music-production",
+    "name": "Music Production",
+    "description": "Mood references, arrangement structure, and a mix/master checklist for composing and producing a track.",
+    "file": "music-production.json"
+  },
+  {
+    "id": "animation-pipeline",
+    "name": "Animation Pipeline (2D/3D)",
+    "description": "Story to final render for a short — with the actual \"lock before you proceed\" gates that keep late redesigns from blowing up the schedule.",
+    "file": "animation-pipeline.json"
+  },
+  {
+    "id": "photography-concept",
+    "name": "Photography / Concept Art Reference",
+    "description": "Mood, lighting, and composition references for planning a photo shoot or concept art piece.",
+    "file": "photography-concept.json"
+  },
+  {
+    "id": "architecture-product",
+    "name": "Architecture & Product Design",
+    "description": "Material references, form studies, and technical constraints for an architecture or industrial/product design project.",
+    "file": "architecture-product.json"
+  },
+  {
+    "id": "ui-ux-design",
+    "name": "UI/UX Design Reference",
+    "description": "Research through a locked design-system, in the order real product teams actually work: understand the user, map the flow, THEN design the screen.",
+    "file": "ui-ux-design.json"
+  },
+  {
+    "id": "branding-identity",
+    "name": "Branding & Identity",
+    "description": "Mood, competitor landscape, and logo/typography exploration for a brand identity project.",
+    "file": "branding-identity.json"
+  },
+  {
+    "id": "character-design",
+    "name": "Character Design",
+    "description": "A real character-design pass: silhouette-first thinking, a locked color/prop palette, and the turnaround sheet a rigger or 3D artist actually needs to build from.",
+    "file": "character-design.json"
+  }
+]

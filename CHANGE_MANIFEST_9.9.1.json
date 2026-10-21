@@ -1,0 +1,131 @@
+{
+  "version": "9.9.1",
+  "baselineArchiveSHA256": "1f5b81292e7240f83ee165871d3f1e405ebb4dce1ac730f0e68d8d5b5ce6c1c2",
+  "changes": [
+    {
+      "path": "docs/CHANGES_9.9.1.md",
+      "beforeSHA256": null,
+      "afterSHA256": "5161827eb1d2e758e71403367651aaa80d7ba968374bd94dd85fc55e96092b1a"
+    },
+    {
+      "path": "docs/index.html",
+      "beforeSHA256": "3c62120529042a15b6f58fc64f8297d93fd567ec29e39bbb5f617d5993a6f2d3",
+      "afterSHA256": "0170916ee172e0d1df74d962248cb369ad6d439788f656083b64fbd54065a0f3"
+    },
+    {
+      "path": "docs/Kanvaz_Overview.pdf",
+      "beforeSHA256": "ebbf452f8a701fb943cea420b4026d54c9263528ec348d661f36de42b9a7cc27",
+      "afterSHA256": "a194df47208100dd35682e59db82982451e87d3f2d645a0448980818e2fffdc8"
+    },
+    {
+      "path": "package-lock.json",
+      "beforeSHA256": "ca7d1e71f5676b13b18e7d7be4a0e62f335de1e42f103381801dece9dad75a8b",
+      "afterSHA256": "b4ac6610eedd1f8542b917442cfeb7243ffe5f674d7fd90100ac33afd97d51ff"
+    },
+    {
+      "path": "package.json",
+      "beforeSHA256": "08bde8f4f6d7504468e1e4f180cab567378b28ded8abae62b0a631a56d37d211",
+      "afterSHA256": "40a3b2d952d7db32048f08f0e5552bdce4eb28841810cfce6128ab9438b01cf3"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "beforeSHA256": null,
+      "afterSHA256": "4952a07aa9c8ccd3e968a0988469fc00c4cc10dc9eec294cf6f8ff302cc5a950"
+    },
+    {
+      "path": "README.md",
+      "beforeSHA256": "17051bfd0b917e9acbe7a39c1089680c217e5311b8f1e246a2d0e809d3e3aa17",
+      "afterSHA256": "b1b3e10e7852e9f9256192d0379b466354228a4df429aa14ab3150cdeda02abb"
+    },
+    {
+      "path": "src/billfish.js",
+      "beforeSHA256": "d08e3ac766bc46a96a83c2c4ba756d1a965037e66aee4eb6f02e19f6d906f0fe",
+      "afterSHA256": "6d7772e269cb60f2fe600f5fcfceac59858be76128d0572db5102e0c3c8e97eb"
+    },
+    {
+      "path": "src/boards.js",
+      "beforeSHA256": "ea6d9db9ec9c93077dcbece3aa39e8b40f6bb645f06c30736543f335758849d1",
+      "afterSHA256": "54db30c108ea9484680f5fa280742c20604f438f3716c6ad30325f5490d9fef3"
+    },
+    {
+      "path": "src/cache-location.js",
+      "beforeSHA256": null,
+      "afterSHA256": "e126f396048f6e04bd5ff58a187371186712ecec528d470f656d8863e8450fb4"
+    },
+    {
+      "path": "src/frame-media-main.js",
+      "beforeSHA256": "ddacf23eae757f5321017ea8da45e3289cff20a5f7b15602062054f8792f6c01",
+      "afterSHA256": "488898f49402608b19e4874c733c253d4256b3883fc7cd902e4ce986a115d5e6"
+    },
+    {
+      "path": "src/frame-player.css",
+      "beforeSHA256": "78631b52b08a67952ce7b720ca5beef131ecf1fac634a3c7ce76d81e97bc302e",
+      "afterSHA256": "6d42f7415ad4786f3ede7d43e3b22f85d57fbabaae3158b88a61ed3c752a5cec"
+    },
+    {
+      "path": "src/frame-player.js",
+      "beforeSHA256": "8f6012cfe3e75a94abefb1db9c53305c2527770bdd7b7eee5075e28395f1cd66",
+      "afterSHA256": "01a332faa0c66b372b54b9b0c546de553f007a8aed50140bfc7e5727e79696e1"
+    },
+    {
+      "path": "src/i18n.js",
+      "beforeSHA256": "62deb748de5dcabc52030a3e806024fbf8f41a4ba03a77c438f1006edecb1941",
+      "afterSHA256": "57ca9cd27d38c1debd21afea21cac5b9e04aaf21e11672366c914e7331a8bf64"
+    },
+    {
+      "path": "src/index.html",
+      "beforeSHA256": "f463377817ea4df470891bd7c067ca8124b28f90519f991270c577fb1d11887d",
+      "afterSHA256": "eb6f1aa64a58be09b84029054522ef6bbb8245426988b4f67e0ec08ae68f5766"
+    },
+    {
+      "path": "src/main.js",
+      "beforeSHA256": "9ec332ee96f6568e876bb2f57b618070fff02ec86347b8f7280afceee271fd87",
+      "afterSHA256": "fdda48334deb33dac773475b7f2335e5ef23704f33445a83337b26049cb4186b"
+    },
+    {
+      "path": "src/preload.js",
+      "beforeSHA256": "2082010eaa3684697653ab54024eaf6e959a6109eaa0b223f955ca4a9c5f6b73",
+      "afterSHA256": "120a643f259c9f6cc895966bf9b02ea8ba7faf863e104f47453d4d11b4b9bed4"
+    },
+    {
+      "path": "src/shortcuts.js",
+      "beforeSHA256": "0ce776f14e4c48dac84dce544981949e84817c37b4be279a54114b67c18cfecc",
+      "afterSHA256": "6c885fe12844fb71dbf71faa0a580d78d4e783323f5b3bcdc07208db7a186008"
+    },
+    {
+      "path": "test/cache-location-test.js",
+      "beforeSHA256": null,
+      "afterSHA256": "70fe7c2bde72a83cccef8a8008d063109a449aa694e76c66b552ad43ab9ac1ec"
+    },
+    {
+      "path": "test/fixture-launch.js",
+      "beforeSHA256": null,
+      "afterSHA256": "a136fff84908b2d84356ff5e4b7c1e95cd29528c05d84116dfb5d60031be21be"
+    },
+    {
+      "path": "test/fixtures/frame-step.mp4",
+      "beforeSHA256": null,
+      "afterSHA256": "d243fbd1b4ed69c8744a03837c91708696bb960354d124186c60246fb32cda7b"
+    },
+    {
+      "path": "test/review-9.9.1.js",
+      "beforeSHA256": null,
+      "afterSHA256": "a7c3ac596160aac9b40bdbc4c35beacaa78907a3a0bd4b4ddf291789a3819e6b"
+    },
+    {
+      "path": "test/verify-build.js",
+      "beforeSHA256": null,
+      "afterSHA256": "d2d322659f674420fa3abb9aaf49407933eb80455377015d72f584d3df66dfd3"
+    },
+    {
+      "path": "tools/build-local.js",
+      "beforeSHA256": null,
+      "afterSHA256": "35bc8625fa2eddaa9557395a250cc5ee494fb3ca6a824ea64da4655eaf4be02e"
+    },
+    {
+      "path": "tools/package-local-delivery.py",
+      "beforeSHA256": null,
+      "afterSHA256": "2790c825fbb12f6e21b07f69b291c9f7abab7129df3fa423a5359563e6e7284d"
+    }
+  ]
+}

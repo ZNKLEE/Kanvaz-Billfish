@@ -1,0 +1,2140 @@
+/* app.js — renderer entry point */
+
+var KanvazApp = (function() {
+
+  var alwaysOnTop = false;
+  var currentBoardPath = null;
+  var boardDirty = false;
+
+  /* ── Boot ── */
+
+  function init() {
+    KanvazErrors.init();
+    if (typeof KanvazTooltip !== 'undefined') KanvazTooltip.init();
+
+    try {
+      var container = document.getElementById('canvas-container');
+      var world     = document.getElementById('canvas-world');
+      var grid      = document.getElementById('canvas-grid');
+
+      KanvazCanvas.init(container, world, grid);
+      KanvazCards.init(world);
+      KanvazHistory.init();
+      KanvazShortcuts.init();
+      if (typeof KanvazCommands !== 'undefined') KanvazCommands.init();
+      KanvazBoards.init();
+      if (typeof KanvazMapView !== 'undefined') KanvazMapView.init();
+      if (typeof KanvazScratchBoard !== 'undefined') KanvazScratchBoard.init();
+      KanvazUI_Extended.init();
+      if (typeof KanvazSidePanel !== 'undefined') KanvazSidePanel.init();
+
+      KanvazCanvas.initDrop(function(files, worldPos) {
+        handleDroppedFiles(files, worldPos);
+      });
+
+      /* Paste from clipboard */
+      document.addEventListener('paste', function(e) {
+        handlePaste(e);
+      });
+
+      /* Recovery check */
+      KanvazBridge.on('recovery-available', function() {
+        showRecoveryDialog();
+      });
+
+      /* BUG 1 fix: main process intercepts window close and asks us
+         whether it's safe to close (unsaved changes check). */
+      KanvazBridge.on('check-unsaved-before-close', function() {
+        if (typeof KanvazFrames !== 'undefined') KanvazFrames.flush().then(handleCloseRequest).catch(function(e) { KanvazUI.toast('笔记保存失败，未关闭：' + e.message, 'error'); });
+        else handleCloseRequest();
+      });
+
+      /* BUG 5 fix: main process sends this when Kanvaz is launched (or
+         handed off via single-instance lock) with a .kanvaz file — e.g.
+         double-clicking a file, or "Open with Kanvaz". */
+      KanvazBridge.on('open-file-from-argv', function(filePath) {
+        if (filePath) KanvazBoards.openFilePath(filePath);
+      });
+
+      /* "Open with Kanvaz" from the OS (Explorer, Finder, a Linux file
+         manager) or a path on the command line, for anything that is not a
+         board. Handled exactly like a drop: same type detection, same cards. */
+      KanvazBridge.on('open-media-from-argv', function(paths) { handleOpenedFiles(paths); });
+
+      /* Kanvaz Link: a 3D model sent from the Blender add-on. main.js has
+         already checked consent, read the file from Kanvaz's private drop
+         folder and deleted it; this only places the card and reports back.
+         Cards land near the middle of the current view, cascading so several
+         sends do not stack exactly. If the Home Screen is showing, a fresh
+         board is started first. */
+      var linkPlaced = 0;
+      KanvazBridge.on('link-deliver', function(p) {
+        var report = function(ok, cardId, reason) {
+          if (KanvazBridge.linkResult) KanvazBridge.linkResult({ deliveryId: p && p.deliveryId, ok: ok, cardId: cardId || null, reason: reason || null });
+        };
+        try {
+          if (!p || typeof p.dataUrl !== 'string' || typeof p.deliveryId !== 'string') { report(false, null, 'malformed delivery'); return; }
+          if (document.getElementById('startup-screen')) KanvazBoards.newBoard();
+          var place = function() {
+            try {
+              var c = document.getElementById('canvas-container');
+              var r = c ? c.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 };
+              var pos = KanvazCanvas.screenToWorld(r.left + r.width / 2, r.top + r.height / 2);
+              var off = (linkPlaced++ % 8) * 28;
+              var card = KanvazCards.createModelFromLink(p, { x: Math.round(pos.x - 210 + off), y: Math.round(pos.y - 170 + off) });
+              KanvazCards.selectCard(card.id);
+              report(true, card.id);
+            } catch (e) { report(false, null, 'could not create the card: ' + e.message); }
+          };
+          /* newBoard() swaps the screen asynchronously. */
+          if (document.getElementById('startup-screen')) setTimeout(place, 400); else place();
+        } catch (e) { report(false, null, e.message); }
+      });
+      /* Tell main the listener above exists. Anything queued while the page
+         was loading is delivered now. */
+      if (KanvazBridge.linkRendererReady) KanvazBridge.linkRendererReady();
+
+      /* Usability fix (2026-09-22): "Check for updates" is now driven
+         entirely by these five events from main.js's real updater — see
+         its comment for why the old parallel renderer-side GitHub fetch
+         is gone. #about-update-status / #about-update-btn are looked up
+         fresh each time (the About screen may or may not be open when
+         an event lands) rather than kept in a stale reference. */
+      function updateStatusEls() {
+        return {
+          status: document.getElementById('about-update-status'),
+          btn: document.getElementById('about-update-btn')
+        };
+      }
+
+      KanvazBridge.on('checking-for-update', function() {
+        var els = updateStatusEls();
+        if (els.status) { els.status.style.color = 'var(--color-text-3)'; els.status.textContent = 'Checking…'; }
+      });
+
+      KanvazBridge.on('update-not-available', function() {
+        var els = updateStatusEls();
+        var version = (typeof KanvazBoards !== 'undefined' && KanvazBoards.getVersion) ? KanvazBoards.getVersion() : '';
+        if (els.status) { els.status.style.color = 'var(--color-text-3)'; els.status.textContent = "You're up to date" + (version ? ' (v' + version + ')' : ''); }
+        if (els.btn) els.btn.disabled = false;
+      });
+
+      KanvazBridge.on('update-error', function(info) {
+        var els = updateStatusEls();
+        if (els.status) { els.status.style.color = 'var(--color-text-3)'; els.status.textContent = (info && info.message) || "Couldn't check for updates"; }
+        if (els.btn) els.btn.disabled = false;
+      });
+
+      /* Portable .exe / unsigned mac build: no well-defined in-place
+         update to apply — quitAndInstall() needs an installed copy to
+         replace, and Squirrel.Mac needs a code signature Kanvaz doesn't
+         have. Both get the same honest, equally-easy fallback: a direct
+         link to the release page. Not an error — the check itself
+         succeeded, auto-install just isn't possible on this build. */
+      KanvazBridge.on('update-unsupported', function(info) {
+        var els = updateStatusEls();
+        var reason = info && info.reason;
+        var releaseUrl = 'https://github.com/p4inz-code/kanvaz/releases/latest';
+        if (reason === 'custom') {
+          if (els.status) els.status.textContent = 'Custom build: upstream updates disabled';
+          if (els.btn) els.btn.disabled = true;
+          return;
+        }
+
+        if (reason === 'dev') {
+          if (els.status) { els.status.style.color = 'var(--color-text-3)'; els.status.textContent = "Updates aren't checked in a dev build"; }
+          if (els.btn) els.btn.disabled = false;
+          return;
+        }
+
+        var text = reason === 'mac-unsigned'
+          ? "Kanvaz isn't signed for macOS yet, so it can't install updates automatically — check the release page for a newer version and drag it into Applications to replace this one."
+          : "Auto-update isn't supported for the portable build — check the release page for a newer version and replace this .exe yourself.";
+
+        if (els.status) {
+          els.status.style.color = 'var(--color-text-3)';
+          els.status.textContent = 'Auto-update not available on this build — ';
+          var link = document.createElement('a');
+          link.href = '#';
+          link.style.color = 'var(--color-accent)';
+          link.style.textDecoration = 'underline';
+          link.textContent = 'open release page';
+          link.onclick = function(e) { e.preventDefault(); KanvazBridge.openExternal(releaseUrl); };
+          els.status.appendChild(link);
+        }
+        if (els.btn) els.btn.disabled = false;
+
+        KanvazUI.showDialog(
+          'Auto-update not available',
+          text,
+          [
+            { label: 'Open release page', cls: 'primary', action: function() { KanvazBridge.openExternal(releaseUrl); } },
+            { label: 'Later', cls: '' }
+          ]
+        );
+      });
+
+      /* Audit fix (live-tested): this used to fire a "found —
+         downloading…" toast and silently start the download right
+         then, with no way to say no — main.js's autoDownload flag is
+         now false specifically so this dialog is the actual decision
+         point, not a courtesy notice after the fact. By the time this
+         fires, main.js has already confirmed (via 'update-unsupported')
+         that this build can actually auto-install — no portable/mac
+         branch needed here any more. */
+      KanvazBridge.on('update-available', function(info) {
+        /* Reset so a second check-for-updates in the same session (the
+           user cancelled, or re-checked later) gets its own fresh set
+           of 25%-milestone toasts instead of the tracker still sitting
+           at wherever a previous download left off. */
+        lastProgressMilestone = -1;
+        var version = info && info.version;
+        var label = 'Kanvaz' + (version ? ' v' + version : '') + ' is available.';
+        var releaseUrl = 'https://github.com/p4inz-code/kanvaz/releases/latest';
+
+        var els = updateStatusEls();
+        if (els.status) { els.status.style.color = 'var(--color-accent)'; els.status.textContent = label; }
+        if (els.btn) els.btn.disabled = false;
+
+        KanvazUI.showDialog(
+          'Update available',
+          label + ' Download and install it automatically, or open the release page to grab it yourself?',
+          [
+            { label: 'Download automatically', cls: 'primary', action: function() { KanvazBridge.downloadUpdate(); } },
+            { label: 'Open release page', cls: '', action: function() { KanvazBridge.openExternal(releaseUrl); } },
+            { label: 'Later', cls: '' }
+          ]
+        );
+      });
+
+      /* Download progress feedback (4.9.0) — the flow used to go
+         straight from "found" to silence until "ready to restart," with
+         nothing shown in between even though electron-updater was
+         already emitting real progress numbers the whole time. Toasts
+         at 25% milestones rather than a live-updating bar — toast()
+         always creates a brand-new element per call (no in-place update
+         path), and progress events fire far more often than every 25%,
+         so a toast per event would spam the corner of the screen. */
+      var lastProgressMilestone = -1;
+      KanvazBridge.on('update-download-progress', function(info) {
+        var percent = info && typeof info.percent === 'number' ? info.percent : null;
+        if (percent === null) return;
+        var milestone = Math.floor(percent / 25) * 25;
+        if (milestone > lastProgressMilestone && milestone > 0) {
+          lastProgressMilestone = milestone;
+          KanvazUI.toast('Downloading update… ' + milestone + '%');
+        }
+      });
+
+      KanvazBridge.on('update-downloaded', function(info) {
+        KanvazUI.showDialog(
+          'Update ready',
+          'Kanvaz' + (info && info.version ? ' v' + info.version : '') + ' has been downloaded. Restart now to install it?',
+          [
+            { label: 'Restart & Install', cls: 'primary', action: function() { KanvazBridge.installUpdate(); } },
+            { label: 'Later', cls: '' }
+          ]
+        );
+      });
+
+      /* Wire every button — CSP blocks inline onclick, so bind here */
+      bindGlobalUI();
+
+      /* Zoom display is now updated reactively from canvas.js applyTransform() */
+
+      updateSaveStatus('ready');
+      updateCardCount(0);
+    } catch (e) {
+      console.error('[Kanvaz] init() crashed:', e);
+      if (typeof KanvazUI !== 'undefined' && KanvazUI.toast) {
+        KanvazUI.toast('Boot error: ' + e.message, 'error');
+      }
+    }
+  }
+
+  /* ── Global UI bindings (CSP-safe: no inline onclick) ── */
+
+  function bindGlobalUI() {
+    function on(id, handler) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('click', handler);
+    }
+
+    /* Titlebar */
+    on('btn-moodlock',      function() { toggleMoodLock(); });
+    on('btn-minimize',      function() { KanvazBridge.minimize(); });
+    on('btn-maximize',      function() { KanvazBridge.maximize(); });
+    on('btn-close',         function() { KanvazBridge.close(); });
+
+    /* Toolbar */
+    /* Bug-bounty fix: this called showHomeScreen() while every other
+       entry point (Ctrl+H, the account-menu item, the Command Palette)
+       deliberately calls toggleHomeScreen() to avoid stacking a second
+       #startup-screen overlay — this one click path was missed, and
+       since the overlay renders behind this same clickable logo (it's
+       only reachable again after the overlay covers it), a double-click
+       here could genuinely stack two. */
+    on('titlebar-logo', function() { if (KanvazBoards.toggleHomeScreen) KanvazBoards.toggleHomeScreen(); });
+    on('btn-new',       function() { KanvazBoards.newBoard(); });
+    on('btn-open',      function() { KanvazBoards.openBoard(); });
+    /* Bug fix: this toolbar button was wired to the PureRef-only
+       importPurFile() — see importMediaFiles()'s own comment above for
+       the direct feedback that prompted switching it to a general
+       "import any supported file" picker instead. .pur import is still
+       reachable from the canvas right-click menu's own "Import .pur
+       file" entry (commands.js), unchanged. */
+    on('btn-import',    function() { importMediaFiles(); });
+    on('btn-save',      function() { KanvazBoards.saveBoard(); });
+    on('btn-zoom-in',   function() { KanvazCanvas.zoomIn(); });
+    on('btn-zoom-out',  function() { KanvazCanvas.zoomOut(); });
+    on('zoom-display',  function() { KanvazCanvas.zoomReset(); });
+    on('btn-undo',      function() { KanvazHistory.undo(); });
+    on('btn-redo',      function() { KanvazHistory.redo(); });
+    /* Every view-toggle handler below re-syncs the empty-state hint
+       (updateEmptyState, above) after switching — its own card-count
+       check alone doesn't know a VIEW switch just happened, so without
+       this it stayed stuck showing/hiding whatever it last was until
+       the next card add/delete. */
+    function refreshEmptyState() {
+      if (typeof KanvazCards !== 'undefined') updateEmptyState(KanvazCards.getAllIds().length === 0);
+    }
+    on('btn-view-board', function() {
+      if (typeof KanvazMapView !== 'undefined' && KanvazMapView.isActive()) KanvazMapView.toggle();
+      if (typeof KanvazScratchBoard !== 'undefined' && KanvazScratchBoard.isActive()) KanvazScratchBoard.setActive(false);
+      refreshEmptyState();
+    });
+    on('btn-view-map', function() {
+      if (typeof KanvazScratchBoard !== 'undefined' && KanvazScratchBoard.isActive()) KanvazScratchBoard.setActive(false);
+      if (typeof KanvazMapView !== 'undefined' && !KanvazMapView.isActive()) KanvazMapView.toggle();
+      refreshEmptyState();
+    });
+    /* Scratch Board (9.5.0) — third view. Same #canvas-world/cards as
+       Board (no separate toggle() lifecycle like Map View needs), so
+       this only has to turn Map off and turn Scratch on.
+       Bug fix: this originally flipped Scratch with `!isActive()`, unlike
+       btn-view-board/btn-view-map which only ever turn their OWN view on
+       (clicking the already-active button is a no-op, standard segmented-
+       control behavior) — clicking Scratch a second time was kicking the
+       user back to Board, an inconsistent double-click trap its sibling
+       buttons don't have. Now it only ever turns Scratch on, matching them. */
+    on('btn-view-scratch', function() {
+      if (typeof KanvazMapView !== 'undefined' && KanvazMapView.isActive()) KanvazMapView.toggle();
+      if (typeof KanvazScratchBoard !== 'undefined' && !KanvazScratchBoard.isActive()) KanvazScratchBoard.setActive(true);
+      refreshEmptyState();
+    });
+    /* v7.x redesign — Settings moved into the left side panel; About/
+       Shortcuts consolidated into the corner account-menu button (see
+       sidepanel.js's initAccountMenu, wired from KanvazSidePanel.init()). */
+
+    /* Maximize/restore icon toggle — also drives the Home Screen's own
+       minimize/maximize/close buttons (boards.js's #home-btn-* trio,
+       added because the real #titlebar-controls sit underneath the
+       Home Screen's full-screen opaque overlay and were completely
+       unreachable from there). Those buttons' click handlers are wired
+       directly in boards.js at the moment each one is created — this
+       function only runs ONCE, at startup, well before the Home Screen
+       overlay's DOM exists for the first time, so an on('home-btn-...')
+       binding here would silently find nothing and never attach; the
+       icon-toggle state below re-queries live on every call instead,
+       which works correctly whether or not the overlay happens to be
+       open right now. */
+    var iconMax = document.getElementById('icon-maximize');
+    var iconRes = document.getElementById('icon-restore');
+    var btnMax  = document.getElementById('btn-maximize');
+
+    function setMaximizedIcon(isMax) {
+      if (iconMax && iconRes) {
+        iconMax.style.display = isMax ? 'none' : '';
+        iconRes.style.display = isMax ? '' : 'none';
+      }
+      if (btnMax) btnMax.dataset.tooltip = isMax ? 'Restore' : 'Maximize';
+
+      /* The Home Screen overlay is torn down and rebuilt from scratch
+         each time it opens (see boards.js), so #home-icon-maximize/
+         #home-icon-restore/#home-btn-maximize may not exist in the DOM
+         at all right now — re-read them live on every call instead of
+         caching stale references from whenever bindGlobalUI() first ran
+         (which is once, at startup, almost certainly before the Home
+         Screen has ever been built). */
+      var homeIconMax = document.getElementById('home-icon-maximize');
+      var homeIconRes = document.getElementById('home-icon-restore');
+      var homeBtnMax  = document.getElementById('home-btn-maximize');
+      if (homeIconMax && homeIconRes) {
+        homeIconMax.style.display = isMax ? 'none' : '';
+        homeIconRes.style.display = isMax ? '' : 'none';
+      }
+      if (homeBtnMax) homeBtnMax.dataset.tooltip = isMax ? 'Restore' : 'Maximize';
+    }
+
+    KanvazBridge.isMaximized().then(function(isMax) {
+      setMaximizedIcon(!!isMax);
+    }).catch(function() {});
+
+    KanvazBridge.on('window-maximized-changed', function(isMax) {
+      setMaximizedIcon(!!isMax);
+    });
+  }
+
+  /* ── File drop ── */
+
+  /* Shared by drag-drop and clipboard paste — grid-arranges N new items
+     from a base point in drop/paste order, left-to-right top-to-bottom,
+     so a batch of any size never stacks on top of itself.
+     Spacing is sized off the real defaultCardW setting (default 600,
+     user-configurable up to 1200) plus margin — a fixed 220px spacing
+     looked fixed but cards could still overlap since real dropped/
+     pasted images are routinely 400-600px wide, wider than the gap. */
+  function gridArrangePos(baseX, baseY, idx, total) {
+    var cardW = 600, cardH = 450;
+    if (typeof KanvazUI_Extended !== 'undefined') {
+      var s = KanvazUI_Extended.getSettings();
+      if (s && s.defaultCardW && s.defaultCardW >= 80) {
+        cardW = s.defaultCardW;
+        cardH = Math.round(cardW * 0.75); /* reasonable 4:3-ish assumption for spacing purposes only */
+      }
+    }
+    var gapX = cardW + 40;
+    var gapY = cardH + 40;
+    var cols = Math.max(1, Math.ceil(Math.sqrt(total)));
+    var col = idx % cols;
+    var row = Math.floor(idx / cols);
+    return { x: baseX + col * gapX, y: baseY + row * gapY };
+  }
+
+  /* Shared by both context menus below — flips to the opposite side if
+     the natural position would overflow, then clamps the final result
+     within the viewport. The flip alone wasn't enough at small window
+     sizes: if the menu is wider/taller than the available space even
+     after flipping, it still clipped off the *other* edge. */
+  function positionMenuInViewport(menu, x, y) {
+    menu.style.left = x + 'px';
+    menu.style.top  = y + 'px';
+    menu.style.display = 'block';
+
+    var rect = menu.getBoundingClientRect();
+    var left = x, top = y;
+    if (rect.right  > window.innerWidth)  left = x - rect.width;
+    if (rect.bottom > window.innerHeight) top  = y - rect.height;
+    left = Math.max(4, Math.min(left, window.innerWidth  - rect.width  - 4));
+    top  = Math.max(4, Math.min(top,  window.innerHeight - rect.height - 4));
+    menu.style.left = left + 'px';
+    menu.style.top  = top + 'px';
+  }
+
+  /* File objects lose .path on Electron 32+, so resolve each dropped File to a
+     plain { path, name } once, here, and use that everywhere below. */
+  function normalizeDroppedFiles(files) {
+    var out = [];
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var p = '';
+      if (f && f.path !== undefined && typeof f.path === 'string' && !f.__kanvazResolved) p = f.path;
+      if (!p && typeof KanvazBridge !== 'undefined' && KanvazBridge.getPathForFile) p = KanvazBridge.getPathForFile(f);
+      out.push({ path: p, name: (f && f.name) || '', __kanvazResolved: true });
+    }
+    return out;
+  }
+
+  function handleDroppedFiles(files, worldPos) {
+    var frameTargetSnapshot = KanvazFrames.importTarget(1);
+    files = normalizeDroppedFiles(files);
+    /* Intercept .pur files — route to PureRef importer */
+    for (var p = 0; p < files.length; p++) {
+      if (files[p].path && files[p].path.toLowerCase().slice(-4) === '.pur') {
+        importPurFromPath(files[p].path);
+        return;
+      }
+    }
+
+    /* Folder-drop auto-arrange (4.8.0) — a dropped folder arrives here
+       as one opaque, unreadable "File" (the renderer has no filesystem
+       access at all to look inside it itself); resolve-dropped-paths
+       expands any folder into the loose image/video/audio files
+       directly inside it (non-recursive) and passes plain files
+       straight through unchanged. Same grid-arrange behavior below
+       either way — this only changes what's IN the files array before
+       that runs, giving the "dump a folder of images" workflow the
+       same fast one-step result as an actual .pur import's own grid
+       fallback (v4.6.1), without needing PureRef at all. */
+    var pathsToResolve = [];
+    for (var pi = 0; pi < files.length; pi++) {
+      if (files[pi].path) pathsToResolve.push(files[pi].path);
+    }
+    if (typeof KanvazBridge !== 'undefined' && KanvazBridge.resolveDroppedPaths && pathsToResolve.length) {
+      KanvazBridge.resolveDroppedPaths(pathsToResolve).then(function(resolvedPaths) {
+        if (!resolvedPaths.length) {
+          KanvazUI.toast('No supported image/video/audio files found in the dropped item(s)', 'error');
+          return;
+        }
+        var resolvedFiles = [];
+        for (var ri = 0; ri < resolvedPaths.length; ri++) {
+          var rp = resolvedPaths[ri];
+          var sep = Math.max(rp.lastIndexOf('/'), rp.lastIndexOf('\\'));
+          resolvedFiles.push({ path: rp, name: sep === -1 ? rp : rp.slice(sep + 1) });
+        }
+        placeDroppedFiles(resolvedFiles, worldPos, false, frameTargetSnapshot);
+      }).catch(function(e) {
+        console.warn('[Kanvaz] resolveDroppedPaths IPC failed, falling back to the raw drop:', e);
+        placeDroppedFiles(files, worldPos, false, frameTargetSnapshot);
+      });
+      return;
+    }
+
+    placeDroppedFiles(files, worldPos, false, frameTargetSnapshot);
+  }
+
+  /* Files the OS asked Kanvaz to open (see openable-types.js and main.js).
+     Starts a fresh board first when only the Home Screen is showing, then
+     places the files around the middle of the view like a drop would. */
+  function handleOpenedFiles(paths) {
+    if (!paths || !paths.length) return;
+    var place = function() {
+      var c = document.getElementById('canvas-container');
+      var r = c ? c.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 };
+      var center = KanvazCanvas.screenToWorld(r.left + r.width / 2, r.top + r.height / 2);
+      var files = [];
+      for (var i = 0; i < paths.length; i++) {
+        var sep = Math.max(paths[i].lastIndexOf('/'), paths[i].lastIndexOf('\\'));
+        files.push({ path: paths[i], name: sep === -1 ? paths[i] : paths[i].slice(sep + 1) });
+      }
+      /* Each launch from the OS arrives on its own, so successive opens would
+         all land on the same spot. On a board that already has cards the new
+         file goes in the next free space to the right of them (top aligned
+         with the topmost card); on an empty board it goes to the middle. A
+         batch within one launch is laid out in a grid by placeDroppedFiles. */
+      var all = KanvazCards.getAll(), ids = Object.keys(all);
+      var anchor = { x: center.x - 150, y: center.y - 110 };
+      if (ids.length) {
+        var maxRight = -Infinity, minTop = Infinity;
+        for (var ci = 0; ci < ids.length; ci++) {
+          var cd = all[ids[ci]];
+          if (cd.x + cd.w > maxRight) maxRight = cd.x + cd.w;
+          if (cd.y < minTop) minTop = cd.y;
+        }
+        anchor = { x: maxRight + 40, y: minTop };
+      }
+      placeDroppedFiles(files, anchor);
+      KanvazUI.toast(files.length === 1 ? 'Opened ' + files[0].name : 'Opened ' + files.length + ' files', 'success');
+    };
+    if (document.getElementById('startup-screen')) { KanvazBoards.newBoard(); setTimeout(place, 500); }
+    else place();
+  }
+
+  function placeDroppedFiles(files, worldPos, sequencesResolved, frameTargetSnapshot) {
+    frameTargetSnapshot = frameTargetSnapshot || KanvazFrames.importTarget(1);
+    if (!sequencesResolved && files.length === 1 && /\.(png|jpe?g|bmp|webp|tga|tiff?|exr|dpx)$/i.test(files[0].path || '')) {
+      KanvazUI.showDialog('导入图片', files[0].name || files[0].path, [
+        { label: '取消' },
+        { label: '作为单图', cls: 'primary', action: function() { placeDroppedFiles(files, worldPos, true); } },
+        { label: '识别同目录序列', action: function() {
+          KanvazBridge.frameMedia('scan-siblings', { path: files[0].path }).then(function(r) {
+            if (!r.ok) { KanvazUI.toast(r.error, 'error'); return; }
+            var group = KanvazSequences.detect(r.files).find(function(g) { return g.files.some(function(f) { return f.path.toLowerCase() === files[0].path.toLowerCase(); }); });
+            if (!group) { KanvazUI.toast('同目录中没有找到匹配序列', 'warning'); return; }
+            placeDroppedFiles(group.files, worldPos, false, frameTargetSnapshot);
+          });
+        } }
+      ]); return;
+    }
+    /* Grid-arrange the drop instead of a small diagonal cascade — a
+       24px-per-file offset barely separates cards that are ~200-300px,
+       so any real batch drop (10-20 files) visually stacked on top of
+       each other. Cards keep drop order (left-to-right, top-to-bottom)
+       so "in sequence" is preserved, they just no longer overlap. */
+    if (!sequencesResolved && typeof KanvazSequences !== 'undefined' && files.length > 1) {
+      var frameTarget = frameTargetSnapshot;
+      KanvazSequences.resolveGroups(files, function(individuals, accepted) {
+        frameTarget.count = Math.max(1, accepted.length);
+        for (var gi = 0; gi < accepted.length; gi++) {
+          var item = accepted[gi]; var seqPos = { frameTarget: frameTarget, frameIndex: gi };
+          KanvazCards.createSequenceFromPaths(item.group.frames.map(function(frame) { return { path: frame.path, number: frame.number, fieldFromRight: frame.fieldFromRight }; }), item.group.name, item.fps, seqPos, item.group.missing);
+          if (item.group.missing.length) KanvazUI.toast('序列缺帧已跳过：' + item.group.missing.join(', '), 'warning');
+        }
+        placeDroppedFiles(individuals, worldPos, true);
+      });
+      return;
+    }
+    for (var i = 0; i < files.length; i++) {
+      (function(file, idx) {
+        var pos = gridArrangePos(worldPos.x, worldPos.y, idx, files.length);
+        if (!file.path) {
+          KanvazErrors.handle('FILE_NOT_FOUND', file.name);
+          return;
+        }
+        var isModelFile = KanvazMedia.MODEL_EXTS.indexOf(file.path.split('.').pop().toLowerCase()) !== -1;
+        var isExternalConvertFile = KanvazMedia.EXTERNAL_CONVERT_EXTS.indexOf(file.path.split('.').pop().toLowerCase()) !== -1;
+        KanvazMedia.loadFromFile(file, function(result, err) {
+          if (err) {
+            if (err === 'FILE_TOO_LARGE') {
+              KanvazUI.toast((isModelFile || isExternalConvertFile)
+                ? 'Model too large for Kanvaz (max 250MB). Try a decimated/compressed export.'
+                : 'File too large for Kanvaz (max 500MB). Use a smaller preview or proxy file.', 'error');
+            } else if (err === 'FILE_TYPE_INVALID' && KanvazCards.isTextPreviewPath && (KanvazCards.isTextPreviewPath(file.path) || KanvazCards.isPdfPath(file.path) || KanvazCards.isAdobePath(file.path))) {
+              /* Text-like files, PDFs and Adobe files (PSD, AI, XD...) become a file-reference card whose body renders the content. */
+              KanvazCards.createFileRefCardAtPath(pos.x, pos.y, file.path);
+            } else if (err === 'FILE_TYPE_INVALID') {
+              KanvazUI.toast('"' + file.name + '" is not supported. Supported: JPG, PNG, GIF, BMP, WEBP, MP4, WEBM, MOV, MP3, WAV, OGG, M4A, GLB, GLTF, OBJ, FBX, STL, PLY, VOX, USD, USDZ, BLEND, PDF, PSD, AI, XD, INDD and text files', 'error');
+            } else if (err === 'EXTERNAL_TOOL_NOT_FOUND') {
+              /* Blender genuinely not installed is the expected, common
+                 case for most users, not a bug — fall back to a plain
+                 file-reference card (same pattern PDF/unsupported-type
+                 cards already use) instead of a hard error, and say
+                 plainly why, since "could not load" alone would look
+                 like Kanvaz is broken rather than a missing optional
+                 tool. */
+              KanvazCards.createFileRefCardAtPath(pos.x, pos.y, file.path);
+              /* Direct feedback: "it says download blender like what?"
+                 — the old message named a requirement with no context
+                 for what it even is or whether it's optional. Blender
+                 is a separate, real (and free) 3D tool at blender.org,
+                 entirely optional — Kanvaz already added the file as a
+                 real reference either way, this is purely about
+                 unlocking the LIVE 3D preview on top of that. */
+              KanvazUI.toast('"' + file.name + '" added as a file reference. Kanvaz could not find Blender on this PC — if it is installed somewhere unusual, set the BLENDER_PATH environment variable to blender.exe and drop the file again. (Blender is optional, only needed for the live 3D preview.)', 'warning');
+            } else if (err === 'MODEL_TOO_LARGE') {
+              KanvazCards.createFileRefCardAtPath(pos.x, pos.y, file.path);
+              KanvazUI.toast('"' + file.name + '" converts to a model over the 250MB limit. Added it as a file reference instead — try decimating it in Blender first.', 'warning');
+            } else if (err === 'EXTERNAL_TOOL_FAILED') {
+              /* Direct feedback: "the .blend dropped but error came...
+                 didn't add to list" — this branch showed the error but,
+                 unlike EXTERNAL_TOOL_NOT_FOUND right above it, never
+                 fell back to a file-reference card, leaving nothing on
+                 the board at all. Blender being installed but failing
+                 to convert THIS specific file (corrupt, or using a
+                 feature the conversion script can't handle) is no
+                 different from Blender not being installed at all from
+                 the user's perspective — either way, live 3D preview
+                 isn't happening, but the file itself is still real and
+                 worth keeping a reference to. Same fallback, same
+                 "something is better than nothing" reasoning. */
+              KanvazCards.createFileRefCardAtPath(pos.x, pos.y, file.path);
+              KanvazUI.toast('Blender could not convert "' + file.name + '" — the file may be corrupt or use features this conversion can\'t handle. Added it as a file reference instead.', 'error');
+            } else {
+              KanvazUI.toast('Could not load "' + file.name + '"', 'error');
+            }
+            return;
+          }
+
+          /* 200MB-500MB: confirm before adding */
+          if (result.large) {
+            var roundedMB = Math.round(result.sizeMB);
+            KanvazUI.showDialog(
+              'Large file',
+              'Large file (' + roundedMB + 'MB) — may affect canvas performance. Add anyway?',
+              [
+                { label: 'Add',    cls: 'primary', action: function() { KanvazCards.createFromMedia(result, pos); } },
+                { label: 'Cancel', cls: '',         action: function() {} }
+              ]
+            );
+            return;
+          }
+
+          KanvazCards.createFromMedia(result, pos);
+
+          /* Warn on formats Chromium may not support */
+          if (result.ext === 'mkv' || result.ext === 'avi') {
+            KanvazUI.toast(file.name + ' may not play — MKV/AVI support is limited. MP4 or WebM recommended.', 'error');
+          }
+        });
+      })(files[i], i);
+    }
+  }
+
+  /* ── Clipboard paste ── */
+
+  /* ══════════════════════════════════════════
+     SEARCH / FILTER (Ctrl+F or /)
+     Floating search bar that filters cards live by name, type, or tag.
+     Dims non-matching cards (opacity 0.15) instead of hiding them so
+     spatial context is preserved — you can still see where things are
+     relative to each other, just with the matches visually popping.
+     Esc or clearing the input restores all cards to full opacity.
+     ══════════════════════════════════════════ */
+  var searchBar = null;
+  var searchInput = null;
+  var searchActive = false;
+  /* Bug-bounty fix: the type-filter dropdown (typeMenu, built fresh
+     inside showSearchBar() below) is appended straight to document.body
+     rather than inside searchBar, so closing the search bar never
+     touched it — leaving it floating, orphaned, and un-clickable-away
+     the moment searchBar itself was removed out from under it. Set by
+     showSearchBar() each time it (re)builds the dropdown's own
+     closeTypeMenu(), so hideSearchBar() below has something to call. */
+  var closeTypeMenuFn = null;
+
+  /* Session-scoped (not persisted to settings — this is "where did I
+     leave it this session," same category as which card is selected),
+     null until the user actually drags it once, meaning "use the
+     default centered spot." Direct feedback: "make search bar movable
+     as user want." */
+  var searchBarPos = null;
+
+  function positionSearchElements() {
+    var left = searchBarPos ? searchBarPos.x + 'px' : '50%';
+    var top  = searchBarPos ? searchBarPos.y + 'px' : '90px';
+    var xform = searchBarPos ? 'none' : 'translateX(-50%)';
+    if (searchBar) { searchBar.style.left = left; searchBar.style.top = top; searchBar.style.transform = xform; }
+    var secondTop = searchBarPos ? (searchBarPos.y + 42) + 'px' : '132px';
+    if (smartFolderRow) { smartFolderRow.style.left = left; smartFolderRow.style.top = secondTop; smartFolderRow.style.transform = xform; }
+    if (commandResultsEl) { commandResultsEl.style.left = left; commandResultsEl.style.top = secondTop; commandResultsEl.style.transform = xform; }
+  }
+
+  function showSearchBar() {
+    if (searchActive) { focusSearchBar(); return; }
+    searchActive = true;
+
+    searchBar = document.createElement('div');
+    searchBar.id = 'search-bar';
+    searchBar.style.cssText = [
+      'position:fixed', 'top:90px', 'left:50%', 'transform:translateX(-50%)',
+      'width:320px', 'display:flex', 'align-items:center', 'gap:8px',
+      'padding:8px 14px',
+      'background:var(--color-surface)', 'border:1px solid var(--color-border-2)',
+      'border-radius:var(--radius-lg)', 'box-shadow:0 8px 32px var(--color-shadow)',
+      'z-index:10000',
+      'animation:search-bar-in 0.2s ease-out'
+    ].join(';');
+
+    /* Drag handle — a dedicated grip rather than "drag the bar's own
+       background," since flex children already fill nearly all of the
+       bar's width and leave no practical grab area otherwise. */
+    var dragHandle = document.createElement('span');
+    dragHandle.title = 'Drag to move';
+    dragHandle.style.cssText = 'cursor:move;flex-shrink:0;display:flex;color:var(--color-text-3);';
+    dragHandle.innerHTML = '<svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="2" r="1.3"/><circle cx="8" cy="2" r="1.3"/><circle cx="2" cy="7" r="1.3"/><circle cx="8" cy="7" r="1.3"/><circle cx="2" cy="12" r="1.3"/><circle cx="8" cy="12" r="1.3"/></svg>';
+    dragHandle.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      var rect = searchBar.getBoundingClientRect();
+      var offX = e.clientX - rect.left;
+      var offY = e.clientY - rect.top;
+      function onMove(ev) {
+        searchBarPos = { x: ev.clientX - offX, y: ev.clientY - offY };
+        positionSearchElements();
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    searchBar.appendChild(dragHandle);
+
+    /* Polish fix: was a raw magnifying-glass emoji, rendered via the OS
+       emoji font \u2014 visually clashes with every other icon in the app,
+       which is a hand-drawn stroke-based SVG set (stroke-width:1.5,
+       stroke-linecap:round, see index.html's toolbar icons). Matching
+       that convention here instead of standing out as the one emoji
+       in an otherwise all-vector UI. */
+    var icon = document.createElement('span');
+    icon.style.cssText = 'color:var(--color-text-3);flex-shrink:0;display:flex;';
+    icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M9.5 9.5L12.5 12.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+
+    searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search by name, type, or tag…';
+    searchInput.style.cssText = [
+      'flex:1', 'background:transparent', 'border:none', 'outline:none',
+      'color:var(--color-text)', 'font-family:var(--font-ui)', 'font-size:13px'
+    ].join(';');
+
+    /* v6.2.0 \u2014 Smart Folders: a saved search that keeps re-running
+       itself, Eagle's own standout feature. Stored in settings.json
+       (settings.smartFolders), not per-board \u2014 these are reusable query
+       patterns ("all my color-graded shots," "tag:hero"), not content
+       tied to one specific board. */
+    var saveBtn = document.createElement('span');
+    saveBtn.title = 'Save this search as a Smart Folder';
+    saveBtn.style.cssText = 'cursor:pointer;color:var(--color-text-3);flex-shrink:0;display:flex;';
+    saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.5l1.6 3.4 3.7.5-2.7 2.6.6 3.7L7 9.9l-3.2 1.8.6-3.7-2.7-2.6 3.7-.5L7 1.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
+    saveBtn.addEventListener('click', function() {
+      var q = searchInput.value.trim();
+      if (!q) { KanvazUI.toast('Type a search first'); return; }
+      KanvazUI.showPrompt('Save Smart Folder', 'Name this Smart Folder:', q, function(name) {
+        if (typeof KanvazUI_Extended === 'undefined') return;
+        var s = KanvazUI_Extended.getSettings();
+        if (!s) return;
+        if (!s.smartFolders) s.smartFolders = [];
+        s.smartFolders.push({ id: 'sf-' + Date.now(), name: name, query: q });
+        KanvazBridge.writeSettings(JSON.stringify(s));
+        renderSmartFolderChips();
+        KanvazUI.toast('Saved Smart Folder "' + name + '"');
+      });
+    });
+
+    /* Type filter \u2014 click the funnel to filter by card type, cards
+       get dimmed the same way a text mismatch already dims them; click
+       "Clear filter" while one is active to clear it. Direct feedback:
+       "the circled svg must work as [a filter]... more types of object
+       can be searched with search, types of ref cards not the color
+       swatch" \u2014 this was a color-proximity filter before, replaced
+       outright rather than added alongside (see clearSearchFilter's
+       area below for the removed color-matching code). */
+    var typeFilterBtn = document.createElement('span');
+    typeFilterBtn.title = 'Filter by card type';
+    typeFilterBtn.style.cssText = 'cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;width:20px;height:20px;color:' + (activeTypeFilter ? 'var(--color-accent)' : 'var(--color-text-3)') + ';';
+    typeFilterBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
+
+    var typeMenu = null;
+
+    function closeTypeMenu() {
+      if (typeMenu) { typeMenu.remove(); typeMenu = null; }
+      document.removeEventListener('mousedown', onOutsideClick, true);
+      document.removeEventListener('keydown', onTypeMenuEscape, true);
+    }
+    closeTypeMenuFn = closeTypeMenu;
+    function onOutsideClick(e) {
+      if (typeMenu && !typeMenu.contains(e.target) && e.target !== typeFilterBtn) closeTypeMenu();
+    }
+    /* Polish fix: Escape used to close the search bar itself but leave
+       this dropdown open and orphaned behind it — same class of cleanup
+       gap hideSearchBar()'s own commandResultsEl removal exists to
+       prevent. Added/removed in lockstep with onOutsideClick (not a
+       bare unconditional document listener added once per search-bar
+       session) so reopening the search bar repeatedly can't stack up
+       duplicate listeners the way a naive always-on binding would. */
+    function onTypeMenuEscape(e) {
+      if (e.key === 'Escape' && typeMenu) closeTypeMenu();
+    }
+
+    typeFilterBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (typeMenu) { closeTypeMenu(); return; }
+
+      var rect = typeFilterBtn.getBoundingClientRect();
+      typeMenu = document.createElement('div');
+      typeMenu.style.cssText = 'position:fixed;left:' + rect.left + 'px;top:' + (rect.bottom + 8) + 'px;background:var(--color-surface);border:1px solid var(--color-border-2);border-radius:var(--radius-md);box-shadow:0 8px 32px var(--color-shadow);z-index:20001;padding:4px;min-width:140px;';
+
+      if (activeTypeFilter) {
+        var clearRow = document.createElement('div');
+        clearRow.textContent = 'Clear filter';
+        clearRow.style.cssText = 'padding:6px 10px;font-size:12px;color:var(--color-text-2);cursor:pointer;border-radius:5px;border-bottom:1px solid var(--color-border);margin-bottom:2px;';
+        clearRow.addEventListener('mouseenter', function() { clearRow.style.background = 'var(--color-surface-2)'; });
+        clearRow.addEventListener('mouseleave', function() { clearRow.style.background = 'transparent'; });
+        clearRow.addEventListener('click', function() {
+          setTypeFilter(null);
+          typeFilterBtn.style.color = 'var(--color-text-3)';
+          closeTypeMenu();
+        });
+        typeMenu.appendChild(clearRow);
+      }
+
+      for (var i = 0; i < CARD_TYPE_FILTER_OPTIONS.length; i++) {
+        (function(opt) {
+          var row = document.createElement('div');
+          var isOn = activeTypeFilter === opt[0];
+          /* Polish fix: "polish improve the filter opt in search bar" —
+             the only signal for "this is the active type" used to be the
+             label's own text color, easy to miss at a glance in a plain
+             list of 10 otherwise-identical rows. A trailing checkmark
+             reads instantly the way every other menu with a persisted
+             choice in the app already does (Theme, Grid style). */
+          row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;font-size:12px;color:' + (isOn ? 'var(--color-accent)' : 'var(--color-text)') + ';cursor:pointer;border-radius:5px;';
+          var label = document.createElement('span');
+          label.textContent = opt[1];
+          row.appendChild(label);
+          if (isOn) {
+            var check = document.createElement('span');
+            check.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+            check.style.cssText = 'display:flex;flex-shrink:0;';
+            row.appendChild(check);
+          }
+          row.addEventListener('mouseenter', function() { row.style.background = 'var(--color-surface-2)'; });
+          row.addEventListener('mouseleave', function() { row.style.background = 'transparent'; });
+          row.addEventListener('click', function() {
+            setTypeFilter(opt[0]);
+            typeFilterBtn.style.color = 'var(--color-accent)';
+            closeTypeMenu();
+          });
+          typeMenu.appendChild(row);
+        })(CARD_TYPE_FILTER_OPTIONS[i]);
+      }
+
+      document.body.appendChild(typeMenu);
+      setTimeout(function() {
+        document.addEventListener('mousedown', onOutsideClick, true);
+        document.addEventListener('keydown', onTypeMenuEscape, true);
+      }, 0);
+    });
+
+    var closeBtn = document.createElement('span');
+    closeBtn.style.cssText = 'cursor:pointer;color:var(--color-text-3);font-size:16px;flex-shrink:0;';
+    closeBtn.textContent = '\u00D7';
+    closeBtn.addEventListener('click', function() { hideSearchBar(); });
+
+    searchInput.addEventListener('input', function() {
+      applySearchFilter(searchInput.value);
+      updateCommandResults(searchInput.value);
+    });
+    searchInput.addEventListener('keydown', function(e) {
+      e.stopPropagation();
+      if (e.key === 'Escape') hideSearchBar();
+    });
+
+    searchBar.appendChild(icon);
+    searchBar.appendChild(searchInput);
+    searchBar.appendChild(typeFilterBtn);
+    searchBar.appendChild(saveBtn);
+    searchBar.appendChild(closeBtn);
+    document.body.appendChild(searchBar);
+
+    /* Saved Smart Folders \u2014 a row of clickable chips under the input,
+       only rendered when at least one exists. Rebuilt (not just shown/
+       hidden) on every open/save/delete so a folder saved from a
+       previous session \u2014 or deleted just now \u2014 is always accurate. */
+    smartFolderRow = document.createElement('div');
+    smartFolderRow.id = 'smart-folder-row';
+    smartFolderRow.style.cssText = 'position:fixed;top:132px;left:50%;transform:translateX(-50%);width:320px;display:flex;flex-wrap:wrap;gap:6px;z-index:10000;';
+    document.body.appendChild(smartFolderRow);
+    renderSmartFolderChips();
+
+    /* Direct feedback: "the search tool can search settings, tools and
+       about and all stuff in app can be searched from it." The Command
+       Palette (Ctrl+K) already covers every registered command
+       (Settings/About/Shortcuts/etc.), but that's a second shortcut
+       the user has to already know about — this surfaces the same
+       matches directly under the board search bar instead, so there's
+       one search habit that reaches everything, not two separate ones. */
+    commandResultsEl = document.createElement('div');
+    commandResultsEl.id = 'search-command-results';
+    commandResultsEl.style.cssText = 'position:fixed;top:132px;left:50%;transform:translateX(-50%);width:320px;background:var(--color-surface);border:1px solid var(--color-border-2);border-radius:var(--radius-md);box-shadow:0 8px 32px var(--color-shadow);z-index:10000;padding:4px;display:none;';
+    document.body.appendChild(commandResultsEl);
+
+    positionSearchElements();
+    searchInput.focus();
+  }
+
+  var smartFolderRow = null;
+  var commandResultsEl = null;
+
+  /* Matches the search query against every registered app command
+     (KanvazCommands — the same registry Ctrl+K's palette reads from)
+     and shows up to 3 results right under the search bar. Runs a
+     command and closes the search bar on click, same "pick it and
+     you're done" feel as clicking a card result. */
+  function updateCommandResults(query) {
+    if (!commandResultsEl) return;
+    commandResultsEl.innerHTML = '';
+    var q = (query || '').trim();
+    if (!q || typeof KanvazCommands === 'undefined') {
+      commandResultsEl.style.display = 'none';
+      return;
+    }
+
+    var all = KanvazCommands.getAllCommands();
+    var scored = [];
+    for (var i = 0; i < all.length; i++) {
+      var score = KanvazCommands.fuzzyScore(q, all[i].label);
+      if (score !== null) scored.push({ cmd: all[i], score: score });
+    }
+    scored.sort(function(a, b) { return a.score - b.score; });
+    var top = scored.slice(0, 3);
+
+    if (!top.length) {
+      commandResultsEl.style.display = 'none';
+      return;
+    }
+
+    var heading = document.createElement('div');
+    heading.textContent = 'APP';
+    heading.style.cssText = 'font-size:9px;font-weight:600;letter-spacing:0.08em;color:var(--color-text-3);padding:6px 8px 3px;';
+    commandResultsEl.appendChild(heading);
+
+    for (var j = 0; j < top.length; j++) {
+      (function(cmd) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 8px;font-size:12px;color:var(--color-text);cursor:pointer;border-radius:5px;';
+        var label = document.createElement('span');
+        label.textContent = cmd.label;
+        row.appendChild(label);
+        if (cmd.shortcut) {
+          var shortcut = document.createElement('span');
+          shortcut.textContent = cmd.shortcut;
+          shortcut.style.cssText = 'font-size:10px;color:var(--color-text-3);font-family:var(--font-mono);';
+          row.appendChild(shortcut);
+        }
+        row.addEventListener('mouseenter', function() { row.style.background = 'var(--color-surface-2)'; });
+        row.addEventListener('mouseleave', function() { row.style.background = 'transparent'; });
+        row.addEventListener('mousedown', function(e) { e.preventDefault(); });
+        row.addEventListener('click', function() {
+          KanvazCommands.runCommand(cmd.id);
+          hideSearchBar();
+        });
+        commandResultsEl.appendChild(row);
+      })(top[j].cmd);
+    }
+
+    commandResultsEl.style.display = '';
+  }
+
+  function renderSmartFolderChips() {
+    /* Also refreshes the persistent Smart Folders list in the Boards
+       side panel (boards.js), if that section happens to be showing
+       right now — same underlying settings.smartFolders array, two
+       places it's rendered. */
+    if (typeof KanvazBoards !== 'undefined' && KanvazBoards.renderBoardsList) {
+      KanvazBoards.renderBoardsList();
+    }
+    if (!smartFolderRow) return;
+    smartFolderRow.innerHTML = '';
+    if (typeof KanvazUI_Extended === 'undefined') return;
+    var s = KanvazUI_Extended.getSettings();
+    /* Favorites first \u2014 same ordering the side panel's own Smart
+       Folders list (boards.js) applies, so "favorite one, find it
+       faster" holds true in both places it's rendered. .slice() before
+       .sort() so this never reorders the underlying settings.json array
+       itself (sort() mutates in place) just from rendering. */
+    var folders = ((s && s.smartFolders) || []).slice().sort(function(a, b) {
+      return (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0);
+    });
+    for (var i = 0; i < folders.length; i++) {
+      (function(folder) {
+        var chip = document.createElement('div');
+        chip.style.cssText = 'display:flex;align-items:center;gap:5px;padding:3px 8px;background:var(--color-surface);border:1px solid var(--color-border-2);border-radius:999px;font-size:11px;color:var(--color-text-2);cursor:pointer;box-shadow:0 2px 8px var(--color-shadow);';
+        chip.title = 'Left-click: run this search. Right-click: more options.';
+
+        if (folder.favorite) {
+          var heart = document.createElement('span');
+          heart.style.cssText = 'display:flex;color:var(--color-red);flex-shrink:0;';
+          heart.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-6.7-4.35-9.3-8.1C1 10.3 1.7 6.9 4.6 5.4 6.9 4.2 9.6 5 12 7.3 14.4 5 17.1 4.2 19.4 5.4c2.9 1.5 3.6 4.9 1.9 7.5C18.7 16.65 12 21 12 21z"/></svg>';
+          chip.appendChild(heart);
+        }
+
+        var label = document.createElement('span');
+        label.textContent = folder.name;
+        chip.appendChild(label);
+        var del = document.createElement('span');
+        del.textContent = '\u00D7';
+        del.style.cssText = 'color:var(--color-text-3);cursor:pointer;';
+        del.title = 'Delete this Smart Folder';
+        del.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var s2 = KanvazUI_Extended.getSettings();
+          if (!s2 || !s2.smartFolders) return;
+          s2.smartFolders = s2.smartFolders.filter(function(f) { return f.id !== folder.id; });
+          KanvazBridge.writeSettings(JSON.stringify(s2));
+          renderSmartFolderChips();
+        });
+        chip.appendChild(del);
+        chip.addEventListener('click', function() {
+          if (searchInput) {
+            searchInput.value = folder.query;
+            applySearchFilter(folder.query);
+          }
+        });
+        /* Direct feedback: "right click on search will give options
+           open, fav it with heart svg and more" \u2014 routes to the same
+           smartFolder branch showCardContextMenu's sibling
+           showContextMenu() gained above, so Open/Favorite/Rename/
+           Edit query/Delete are all one shared implementation instead
+           of a second copy living here. */
+        chip.addEventListener('contextmenu', function(e) {
+          e.preventDefault();
+          if (typeof KanvazUI !== 'undefined' && KanvazUI.showContextMenu) {
+            KanvazUI.showContextMenu(e.clientX, e.clientY, 'smartFolder', folder);
+          }
+        });
+        smartFolderRow.appendChild(chip);
+      })(folders[i]);
+    }
+  }
+
+  function focusSearchBar() {
+    if (searchInput) searchInput.focus();
+  }
+
+  function hideSearchBar() {
+    searchActive = false;
+    if (searchBar) { searchBar.remove(); searchBar = null; searchInput = null; }
+    if (smartFolderRow) { smartFolderRow.remove(); smartFolderRow = null; }
+    if (commandResultsEl) { commandResultsEl.remove(); commandResultsEl = null; }
+    if (closeTypeMenuFn) { closeTypeMenuFn(); closeTypeMenuFn = null; }
+    clearSearchFilter();
+  }
+
+  /* v6.2.0 — color search (Eagle's own standout feature). Dominant color
+     is computed on first use per card and cached in-memory only
+     Combines with the text query via AND: with both set, a card must
+     match the text AND be the selected type to stay visible.
+
+     v7.x — this used to be a color-proximity filter (average-sample a
+     card's dominant color, click a swatch to match nearby colors).
+     Direct feedback: "the circled svg must work as sort between
+     settings and more types of object can be searched with search,
+     types of ref cards not the color swatch." Replaced outright rather
+     than added alongside — the old color-filter UI was the only way
+     to ever set it, so keeping that matching code with no way to
+     trigger it left dead code behind. */
+  var activeTypeFilter = null; /* card.type string, or null */
+  var CARD_TYPE_FILTER_OPTIONS = [
+    ['image', 'Image'], ['gif', 'GIF'], ['video', 'Video'], ['audio', 'Audio'],
+    ['note', 'Note'], ['text', 'Text'], ['color', 'Color'], ['url', 'URL'],
+    ['file', 'File'], ['model3d', '3D Model']
+  ];
+
+  function setTypeFilter(type) {
+    activeTypeFilter = type;
+    applySearchFilter(searchInput ? searchInput.value : '');
+  }
+
+  function applySearchFilter(query) {
+    var q = query.trim().toLowerCase();
+    var allCards = KanvazCards.getAll();
+    for (var id in allCards) {
+      var card = allCards[id];
+      var el = document.getElementById(id);
+      if (!el) continue;
+
+      if (!q && !activeTypeFilter) {
+        el.style.opacity = '';
+        el.style.filter = '';
+        continue;
+      }
+
+      var textOk = true;
+      if (q) {
+        var nameMatch = (card.name || '').toLowerCase().indexOf(q) !== -1;
+        var typeMatch = (card.type || '').toLowerCase().indexOf(q) !== -1;
+        var tagMatch = false;
+        if (card.tags && card.tags.length) {
+          for (var t = 0; t < card.tags.length; t++) {
+            if (card.tags[t].toLowerCase().indexOf(q) !== -1) { tagMatch = true; break; }
+          }
+        }
+        textOk = nameMatch || typeMatch || tagMatch;
+      }
+
+      var typeOk = !activeTypeFilter || card.type === activeTypeFilter;
+
+      if (textOk && typeOk) {
+        el.style.opacity = '';
+        el.style.filter = '';
+      } else {
+        el.style.opacity = '0.12';
+        el.style.filter = 'grayscale(1)';
+      }
+    }
+
+    scheduleSmartSearch(q);
+  }
+
+  /* v6.3.0 — Smart Search: an async enhancement layer on top of the
+     synchronous substring match above, never a replacement for it. The
+     substring pass already ran and dimmed/undimmed everything by the
+     time this resolves (a real IPC round-trip to the worker, not
+     instant) — this only ever REVEALS more cards a plain substring
+     match missed (lemmatized/fuzzy hits), never re-dims one substring
+     already matched. Completely inert — no timer set, no IPC call made
+     — when the setting is off, which is the actual point of its own
+     off switch, not just a UI toggle. */
+  var smartSearchDebounceTimer = null;
+  /* Bug-bounty fix: the index used to get rebuilt (full-board
+     re-lemmatization, on the worker side) on every single debounced
+     keystroke, not just when the board's cards had actually changed —
+     independently flagged by two review angles as real, avoidable cost
+     on the search-typing hot path. Indexing now happens at most once
+     per search-bar session (reset whenever the bar opens/closes), and
+     every subsequent keystroke only sends the query itself. A card
+     edited WHILE the search bar stays open won't be reflected in Smart
+     Search's results until the bar is reopened — an accepted, disclosed
+     staleness window, since the synchronous substring pass above it is
+     always accurate regardless and never depends on this index. */
+  var smartSearchIndexedThisSession = false;
+
+  function smartSearchIsOn() {
+    if (typeof KanvazUI_Extended === 'undefined') return false;
+    var s = KanvazUI_Extended.getSettings();
+    return !!(s && s.smartSearchEnabled);
+  }
+
+  /* Bug-bounty fix: crashing the worker used to leave settings.json's
+     smartSearchEnabled sitting at true forever with no way back to
+     false except an unrelated Settings change — the checkbox kept
+     claiming the feature was on while it was actually dead. main.js's
+     worker now tells the renderer directly the moment it crashes. */
+  if (typeof KanvazBridge !== 'undefined' && KanvazBridge.on) {
+    KanvazBridge.on('smart-search-crashed', function() {
+      if (typeof KanvazUI_Extended === 'undefined') return;
+      var s = KanvazUI_Extended.getSettings();
+      if (!s || !s.smartSearchEnabled) return;
+      s.smartSearchEnabled = false;
+      KanvazBridge.writeSettings(JSON.stringify(s));
+      if (typeof KanvazUI !== 'undefined') KanvazUI.toast('Smart Search stopped unexpectedly and was turned off — plain search still works.', 'error');
+    });
+  }
+
+  function scheduleSmartSearch(q) {
+    if (smartSearchDebounceTimer) { clearTimeout(smartSearchDebounceTimer); smartSearchDebounceTimer = null; }
+    if (!q || !smartSearchIsOn() || typeof KanvazBridge === 'undefined' || !KanvazBridge.smartSearchQuery) return;
+
+    smartSearchDebounceTimer = setTimeout(function() {
+      smartSearchDebounceTimer = null;
+
+      var indexed = smartSearchIndexedThisSession
+        ? Promise.resolve()
+        : (function() {
+            var allCards = KanvazCards.getAll();
+            var cardTexts = [];
+            for (var id in allCards) {
+              var c = allCards[id];
+              cardTexts.push({
+                id: id,
+                text: [c.name, c.type, (c.tags || []).join(' '), c.text || ''].join(' ')
+              });
+            }
+            smartSearchIndexedThisSession = true;
+            return KanvazBridge.smartSearchIndex(cardTexts);
+          })();
+
+      indexed.then(function() {
+        return KanvazBridge.smartSearchQuery(q);
+      }).then(function(res) {
+        if (!res || !res.results) return;
+        /* If the query changed again while this round-trip was in
+           flight, the input's current value no longer matches what was
+           actually searched — applying stale results now would reveal
+           cards for a query the user isn't looking at anymore. */
+        if (!searchInput || searchInput.value.trim().toLowerCase() !== q) return;
+        for (var i = 0; i < res.results.length; i++) {
+          var el = document.getElementById(res.results[i]);
+          if (!el) continue;
+          /* Bug-bounty fix (v6.2.0, carried forward through the color
+             → type filter swap): this used to unconditionally reveal
+             every Smart Search match, ignoring the active filter
+             entirely — silently breaking the "must match both"
+             contract the substring pass above already established. A
+             Smart-Search-only match still has to pass the same type
+             check to actually get revealed. */
+          if (activeTypeFilter) {
+            var card = KanvazCards.getAll()[res.results[i]];
+            if (!card || card.type !== activeTypeFilter) continue;
+          }
+          el.style.opacity = '';
+          el.style.filter = '';
+        }
+      }).catch(function() { /* Smart Search unavailable — the substring match above already stands on its own */ });
+    }, 300);
+  }
+
+  function clearSearchFilter() {
+    activeTypeFilter = null;
+    smartSearchIndexedThisSession = false;
+    if (smartSearchDebounceTimer) { clearTimeout(smartSearchDebounceTimer); smartSearchDebounceTimer = null; }
+    var allCards = KanvazCards.getAll();
+    for (var id in allCards) {
+      var el = document.getElementById(id);
+      if (el) { el.style.opacity = ''; el.style.filter = ''; }
+    }
+  }
+
+  function handlePaste(e) {
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+
+    /* Collect image items first so we know the real count up front —
+       the previous approach read document.querySelectorAll('.card').length
+       inside each async FileReader callback, which is both racy (async
+       completion order isn't guaranteed to match paste order) and used
+       the same too-small 24px cascade that stacked drag-dropped files. */
+    var imageItems = [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        var blob = items[i].getAsFile();
+        if (blob) imageItems.push(blob);
+      }
+    }
+    if (!imageItems.length) return;
+
+    var scale = KanvazCanvas.getScale();
+    var baseX = (-KanvazCanvas.getTx() / scale) + 80;
+    var baseY = (-KanvazCanvas.getTy() / scale) + 80;
+
+    for (var j = 0; j < imageItems.length; j++) {
+      (function(b, idx) {
+        var pos = gridArrangePos(baseX, baseY, idx, imageItems.length);
+        var reader = new FileReader();
+        reader.onload = function(ev) {
+          KanvazCards.createFromDataUrl(ev.target.result, 'pasted-image.png', pos);
+        };
+        reader.readAsDataURL(b);
+      })(imageItems[j], j);
+    }
+  }
+
+  /* ── Always on top ── */
+
+  /* v6.0.0: no dedicated toolbar button any more — on by default (see
+     ui.js's SETTINGS_DEFAULTS), reachable via Command Palette or the
+     Settings checkbox for the minority who want it off. */
+  function toggleAlwaysOnTop() {
+    /* Self-audit catch (Top Mode review): this is reachable via the
+       Command Palette regardless of Top Mode, and both flips the live
+       window state AND persists to settings.json. Invoking it while Top
+       Mode has forced always-on-top on would silently overwrite the
+       user's real, persisted preference with Top Mode's transient
+       state, then diverge further the moment Settings next re-applies
+       or the app restarts. Block it here and point at the actual way
+       out, same as any other "this needs Top Mode off first" case. */
+    if (topModeActive) {
+      KanvazUI.toast('Exit Top Mode first (Ctrl+Shift+T)', 'warning');
+      return;
+    }
+    if (moodLockActive) {
+      KanvazUI.toast('Exit MoodLock first (Ctrl+Shift+L)', 'warning');
+      return;
+    }
+    alwaysOnTop = !alwaysOnTop;
+    KanvazBridge.setAlwaysOnTop(alwaysOnTop);
+    /* Persist to settings so the value survives restart */
+    if (typeof KanvazUI_Extended !== 'undefined') {
+      var s = KanvazUI_Extended.getSettings();
+      if (s) {
+        s.alwaysOnTop = alwaysOnTop;
+        KanvazBridge.writeSettings(JSON.stringify(s));
+      }
+    }
+    KanvazUI.toast(alwaysOnTop ? 'Always on top: on' : 'Always on top: off');
+  }
+
+  /* v6.0.0: called from ui.js's applySettings() (both on startup and on
+     every Settings-panel change), to keep this module's own `alwaysOnTop`
+     var in sync with the persisted setting — without this, toggleAlwaysOnTop()
+     (still reachable via Command Palette) would get the in-memory value
+     out of sync with the actual window state the very first time it's
+     called after a settings change, and flip the wrong direction.
+     Doesn't toast or re-persist — ui.js already owns that side of it. */
+  function syncAlwaysOnTop(flag) {
+    alwaysOnTop = !!flag;
+    KanvazBridge.setAlwaysOnTop(alwaysOnTop);
+  }
+
+  /* ── MoodLock ──
+     Requested 2026-10: while working in another app (ZBrush, Blender...) the
+     reference should be just the picture, with none of Kanvaz's own chrome
+     around it. MoodLock = Isolate View on the selected cards (or whatever is
+     already isolated) + the titlebar, toolbar, side panel and status bar all
+     hidden + always-on-top forced, with the board read-only (same single
+     choke points Presentation Mode uses) so a stray click can't move a card.
+     Camera pan/zoom still works. A small lock control in the top-right corner
+     is the way in (it shows while Isolate View is on) and the way out; because
+     the titlebar that normally drags the window is hidden, the locked state
+     also shows a drag grip. Ctrl+Shift+L or Esc leave it too. Session only,
+     like Top Mode: nothing is written to the board file, and leaving restores
+     exactly what was there (always-on-top preference, side panel, and
+     Isolate View if MoodLock was what turned it on). Mutually exclusive with
+     Top Mode and Presentation Mode. Named "MoodLock" for users; the old
+     .moodlock-* CSS classes belong to the chrome auto-hide mechanic and are
+     unrelated, so this uses .mood-lock-* names. */
+  var moodLockActive  = false;
+  var moodLockRestore = null;
+  var moodLockStepped = false;   /* the user flipped through cards with the arrow keys */
+
+  function isMoodLockActive() {
+    return moodLockActive;
+  }
+
+  var MOOD_LOCK_ICON_CLOSED = '<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" shape-rendering=\"geometricPrecision\"><rect x=\"4.5\" y=\"10.5\" width=\"15\" height=\"10\" rx=\"2.2\"/><path d=\"M7.8 10.5V7.8a4.2 4.2 0 0 1 8.4 0v2.7\"/><circle cx=\"12\" cy=\"15.5\" r=\"1.25\" fill=\"currentColor\" stroke=\"none\"/></svg>';
+  var MOOD_LOCK_ICON_OPEN   = '<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" shape-rendering=\"geometricPrecision\"><rect x=\"4.5\" y=\"10.5\" width=\"15\" height=\"10\" rx=\"2.2\"/><path d=\"M7.8 10.5V7.8a4.2 4.2 0 0 1 7.9-2\"/><circle cx=\"12\" cy=\"15.5\" r=\"1.25\" fill=\"currentColor\" stroke=\"none\"/></svg>';
+
+  /* Builds the corner control on first use and keeps it in step with Isolate
+     View (cards.js calls this whenever isolate turns on or off) and with
+     MoodLock itself. CSS decides visibility from two body classes. */
+  function syncMoodLockControl() {
+    var isolated = !!(typeof KanvazCards !== 'undefined' && KanvazCards.isIsolateActive && KanvazCards.isIsolateActive());
+    if (isolated) document.body.classList.add('mood-lock-isolated');
+    else document.body.classList.remove('mood-lock-isolated');
+
+    var ctl = document.getElementById('mood-lock-control');
+    if (!ctl) {
+      ctl = document.createElement('div');
+      ctl.id = 'mood-lock-control';
+      var grip = document.createElement('div');
+      grip.id = 'mood-lock-grip';
+      grip.title = 'Drag to move the window';
+      var posEl = document.createElement('span');
+      posEl.id = 'mood-lock-pos';
+      posEl.title = 'Left / Right arrows: previous / next reference';
+      var btn = document.createElement('button');
+      btn.id = 'mood-lock-btn';
+      btn.type = 'button';
+      btn.onclick = function(e) { e.stopPropagation(); toggleMoodLock(); };
+      ctl.appendChild(grip);
+      ctl.appendChild(posEl);
+      ctl.appendChild(btn);
+      document.body.appendChild(ctl);
+    }
+    var b = document.getElementById('mood-lock-btn');
+    if (moodLockActive) {
+      b.innerHTML = MOOD_LOCK_ICON_CLOSED;
+      b.title = 'MoodLock is on \u2014 click to bring the toolbars back (Ctrl+Shift+L or Esc)';
+      b.setAttribute('aria-label', 'Unlock MoodLock');
+    } else {
+      b.innerHTML = MOOD_LOCK_ICON_OPEN;
+      b.title = 'MoodLock: hide all toolbars and lock this view (Ctrl+Shift+L)';
+      b.setAttribute('aria-label', 'Turn on MoodLock');
+    }
+  }
+
+  /* Left/Right while locked: flip through the board's cards one at a time, in reading order (same order
+     Presentation Mode uses), skipping cards hidden from the Layers panel, wrapping at the ends, and
+     framing each one. From the whole board or a multi-card isolation, Right starts at the first card
+     and Left at the last. */
+  function moodLockStep(dir) {
+    if (!moodLockActive || typeof KanvazCards === 'undefined' || !KanvazCards.isolateOnly) return;
+    var ids = readingOrderCardIds().filter(function(id) {
+      var c = KanvazCards.getCard(id);
+      return c && !c.hidden;
+    });
+    if (!ids.length) return;
+    var visible = ids.filter(function(id) {
+      var el = document.getElementById(id);
+      return el && !el.classList.contains('card-isolated-hidden');
+    });
+    var idx;
+    if (visible.length === 1) idx = ids.indexOf(visible[0]) + dir;
+    else idx = dir > 0 ? 0 : ids.length - 1;
+    idx = (idx + ids.length) % ids.length;
+    var id = ids[idx];
+    KanvazCards.isolateOnly([id]);
+    moodLockStepped = true;
+    try {
+      KanvazCards.setMultiSelection([id]);
+      KanvazCanvas.zoomToSelection();
+      KanvazCards.deselectAll();
+    } catch (e) { /* framing is a nicety; the card is already isolated */ }
+    var posEl = document.getElementById('mood-lock-pos');
+    if (posEl) posEl.textContent = (idx + 1) + ' / ' + ids.length;
+  }
+
+  function toggleMoodLock() {
+    if (moodLockActive) exitMoodLock(); else enterMoodLock();
+  }
+
+  function enterMoodLock() {
+    if (moodLockActive) return;
+    if (presentationModeActive) exitPresentationMode();
+    if (topModeActive) exitTopMode();
+
+    var cardsApi = (typeof KanvazCards !== 'undefined') ? KanvazCards : null;
+    var wasIsolated = !!(cardsApi && cardsApi.isIsolateActive && cardsApi.isIsolateActive());
+    var isolatedByUs = false;
+    /* Isolate the selection first (it needs the selection), then clear it. With
+       nothing selected and nothing isolated, MoodLock simply locks the whole board. */
+    if (!wasIsolated && cardsApi && cardsApi.getSelectedIds && cardsApi.toggleIsolate && cardsApi.getSelectedIds().length) {
+      cardsApi.toggleIsolate();
+      isolatedByUs = !!(cardsApi.isIsolateActive && cardsApi.isIsolateActive());
+    }
+
+    var sidePanelWasOpen = (typeof KanvazSidePanel !== 'undefined' && KanvazSidePanel.isOpen && KanvazSidePanel.isOpen());
+    moodLockRestore = { alwaysOnTop: alwaysOnTop, isolatedByUs: isolatedByUs, sidePanelWasOpen: !!sidePanelWasOpen };
+    moodLockActive = true;
+    moodLockStepped = false;
+
+    syncAlwaysOnTop(true);
+    if (typeof KanvazBridge !== 'undefined' && KanvazBridge.setMoodLockWindow) KanvazBridge.setMoodLockWindow(true);
+    if (sidePanelWasOpen) KanvazSidePanel.close();
+    if (cardsApi && cardsApi.deselectAll) cardsApi.deselectAll();
+    document.body.classList.add('mood-lock-active');
+    if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur) document.activeElement.blur();
+    syncMoodLockControl();
+    KanvazUI.toast('MoodLock on \u2014 Ctrl+Shift+L or Esc to unlock');
+  }
+
+  function exitMoodLock() {
+    if (!moodLockActive) return;
+    moodLockActive = false;
+
+    var r = moodLockRestore || { alwaysOnTop: alwaysOnTop, isolatedByUs: false, sidePanelWasOpen: false };
+    moodLockRestore = null;
+
+    document.body.classList.remove('mood-lock-active');
+    syncAlwaysOnTop(!!r.alwaysOnTop);
+    if (typeof KanvazBridge !== 'undefined' && KanvazBridge.setMoodLockWindow) KanvazBridge.setMoodLockWindow(false);
+    var posEl = document.getElementById('mood-lock-pos');
+    if (posEl) posEl.textContent = '';
+    /* after flipping through cards the original isolation set is gone, so end it entirely */
+    if ((r.isolatedByUs || moodLockStepped) && typeof KanvazCards !== 'undefined' && KanvazCards.isIsolateActive && KanvazCards.isIsolateActive()) {
+      KanvazCards.toggleIsolate();
+    }
+    /* same re-check as Top Mode: only reopen the side panel if it is still closed */
+    if (r.sidePanelWasOpen && typeof KanvazSidePanel !== 'undefined' && KanvazSidePanel.toggle
+        && !(KanvazSidePanel.isOpen && KanvazSidePanel.isOpen())) {
+      KanvazSidePanel.toggle();
+    }
+    syncMoodLockControl();
+    KanvazUI.toast('MoodLock off');
+  }
+
+  /* ── Top Mode (reintroduced, v8.7.0, per direct request) ──
+     Removed entirely in v6.0.0 on the reasoning that "float on top +
+     hide the chrome" had become the app's own persistent default, so a
+     separate mode toggling the same two things felt redundant. That
+     default only ever covered always-on-top + the auto-hide toolbar,
+     though — it never touched the side panel, which stays open (or
+     closed, whatever it was) regardless. "Get everything but the
+     canvas out of the way, right now, then back to exactly how it
+     was" is a real, distinct ask from the standing defaults, which is
+     why this is back as its own toggle rather than just pointing the
+     shortcut at the existing Settings checkboxes.
+
+     Deliberately session-only — never written to settings.json. A
+     momentary "floating reference, minimal chrome" working state is
+     not a standing preference, the same reasoning already applied to
+     Isolate View and view bookmarks. Entering it temporarily overrides
+     always-on-top and the auto-hide-chrome setting via the same
+     functions their own Settings checkboxes call (syncAlwaysOnTop /
+     KanvazUI.setChromeAutoHide) — neither persists on its own, so the
+     real persisted settings are untouched and exiting restores them
+     exactly.
+
+     Self-audit catch after shipping: that "untouched" claim was only
+     true for the specific values captured AT ENTRY. Two other code
+     paths write these same two settings and didn't know Top Mode
+     existed: ui.js's applySettings() (runs on ANY Settings change, not
+     just these two, and would silently snap the live window back to
+     the plain persisted value out from under Top Mode's forced
+     override) and toggleAlwaysOnTop() (Command Palette — would persist
+     Top Mode's transient forced-true state as the user's real
+     preference). Fixed by guarding both: toggleAlwaysOnTop() refuses to
+     run while Top Mode is active (see above), and applySettings()
+     calls noteSettingChangedDuringTopMode() below instead of live-
+     applying — keeping Top Mode's forced state in effect while still
+     making sure exitTopMode() restores whatever the user's LATEST real
+     preference actually is, not a stale entry-time snapshot. */
+  var topModeActive  = false;
+  var topModeRestore = null;
+
+  function isTopModeActive() {
+    return topModeActive;
+  }
+
+  /* Called by ui.js's applySettings() instead of live-applying
+     alwaysOnTop/autoHideChrome while Top Mode owns them — updates what
+     exitTopMode() will restore to, without disturbing Top Mode's
+     current forced-on state. No-ops harmlessly if Top Mode isn't
+     active (nothing should call it then, but cheap to guard). */
+  function noteSettingChangedDuringTopMode(key, value) {
+    if (moodLockActive && moodLockRestore && key === 'alwaysOnTop') {
+      moodLockRestore.alwaysOnTop = !!value;
+      return;
+    }
+    if (!topModeActive || !topModeRestore) return;
+    if (key === 'alwaysOnTop' || key === 'autoHideChrome') {
+      topModeRestore[key] = !!value;
+    }
+  }
+
+  function toggleTopMode() {
+    if (topModeActive) exitTopMode(); else enterTopMode();
+  }
+
+  function enterTopMode() {
+    if (topModeActive) return;
+    if (moodLockActive) exitMoodLock();
+    topModeActive = true;
+
+    var settings = (typeof KanvazUI_Extended !== 'undefined' && KanvazUI_Extended.getSettings)
+      ? KanvazUI_Extended.getSettings() : null;
+    var sidePanelWasOpen = (typeof KanvazSidePanel !== 'undefined' && KanvazSidePanel.isOpen && KanvazSidePanel.isOpen());
+
+    topModeRestore = {
+      alwaysOnTop:      alwaysOnTop,
+      autoHideChrome:   settings ? !!settings.autoHideChrome : false,
+      sidePanelWasOpen: sidePanelWasOpen
+    };
+
+    syncAlwaysOnTop(true);
+    if (typeof KanvazUI !== 'undefined' && KanvazUI.setChromeAutoHide) KanvazUI.setChromeAutoHide(true);
+    if (sidePanelWasOpen) KanvazSidePanel.close();
+
+    /* Live-CDP-audit catch: this used to target #app, but #app sits
+       BEHIND #startup-screen (the Home Screen, position:fixed, opaque,
+       z-index 99998) in paint order — the accent border was completely
+       invisible any time the Home Screen was open, verified with a
+       real screenshot. document.body is an ancestor of every one of
+       this app's full-screen overlays (#startup-screen included), so a
+       ::after pseudo-element on it (see main.css) paints correctly
+       regardless of which screen is showing underneath. */
+    document.body.classList.add('top-mode-active');
+    showTopModeBadge();
+
+    KanvazUI.toast('Top Mode on — Ctrl+Shift+T to exit');
+  }
+
+  function exitTopMode() {
+    if (!topModeActive) return;
+    topModeActive = false;
+
+    var r = topModeRestore || { alwaysOnTop: alwaysOnTop, autoHideChrome: false, sidePanelWasOpen: false };
+    topModeRestore = null;
+
+    syncAlwaysOnTop(!!r.alwaysOnTop);
+    if (typeof KanvazUI !== 'undefined' && KanvazUI.setChromeAutoHide) KanvazUI.setChromeAutoHide(!!r.autoHideChrome);
+    /* Self-audit catch: re-check isOpen() here rather than blindly
+       toggling back open. If the user manually reopened the side panel
+       WHILE Top Mode was active (clicked a rail icon), it's already
+       open — toggle() would then hit its "open on this section already"
+       branch and close it right back, fighting the user's own action.
+       Only reopen it here if it's still closed. */
+    if (r.sidePanelWasOpen && typeof KanvazSidePanel !== 'undefined' && KanvazSidePanel.toggle
+        && !(KanvazSidePanel.isOpen && KanvazSidePanel.isOpen())) {
+      KanvazSidePanel.toggle();
+    }
+
+    document.body.classList.remove('top-mode-active');
+    hideTopModeBadge();
+
+    KanvazUI.toast('Top Mode off');
+  }
+
+  function showTopModeBadge() {
+    if (document.getElementById('top-mode-badge')) return;
+    var badge = document.createElement('div');
+    badge.id = 'top-mode-badge';
+    badge.textContent = 'Top Mode — Ctrl+Shift+T to exit';
+    document.body.appendChild(badge);
+  }
+
+  function hideTopModeBadge() {
+    var badge = document.getElementById('top-mode-badge');
+    if (badge) badge.remove();
+  }
+
+  /* ── Presentation Mode ──
+     Backlog item: "Presentation/kiosk mode for presenting a board from
+     inside the app." Distinct from Top Mode above, which is a working-
+     session convenience (still fully editable) — this is for showing a
+     board TO SOMEONE ELSE (a client/director review), so it goes
+     further: toolbar AND side panel are hard-hidden (never revealed on
+     hover, unlike Top Mode's auto-hide-chrome), and the board becomes
+     read-only for as long as it's active. Read-only is enforced at a
+     single choke point (cards.js's one delegated mousedown handler
+     checks this mode first and returns immediately) rather than
+     threading a check through every individual drag/resize/delete/
+     rename call site — deliberately trades "click a card to select it
+     while presenting" for a much smaller, more confidently-correct
+     surface to get right and verify. Session-only, same scoping
+     decision as Top Mode and view bookmarks — nothing here is ever
+     written to the board file. Mutually exclusive with Top Mode (enter
+     ing this exits Top Mode first) since both fight over the side panel
+     -restore bookkeeping and showing two badges at once would be noise. */
+  var presentationModeActive = false;
+  var presentationRestore    = null;
+  var presentationCardIds    = [];
+  var presentationIndex      = -1;
+
+  function isPresentationModeActive() {
+    return presentationModeActive;
+  }
+
+  /* Left-to-right, top-to-bottom reading order — what a viewer actually
+     expects ←/→ to follow, unlike getAllIds()'s raw creation order.
+     Buckets cards into rows first (rather than a flat y-then-x sort)
+     so two cards placed side by side but not pixel-perfectly aligned
+     still read left-to-right instead of splitting into separate
+     "rows" one after the other. ROW_TOLERANCE_PX is deliberately
+     smaller than a typical default card height — it only needs to
+     absorb small manual-placement drift, not treat a genuinely
+     stacked/offset layout as one row. */
+  var READING_ORDER_ROW_TOLERANCE_PX = 80;
+
+  function readingOrderCardIds() {
+    if (typeof KanvazCards === 'undefined' || !KanvazCards.getAllIds || !KanvazCards.getCard) return [];
+    var ids = KanvazCards.getAllIds();
+    var withPos = ids.map(function(id) {
+      var c = KanvazCards.getCard(id);
+      return { id: id, x: (c && typeof c.x === 'number') ? c.x : 0, y: (c && typeof c.y === 'number') ? c.y : 0 };
+    });
+    withPos.sort(function(a, b) { return a.y - b.y; });
+
+    var rows = [];
+    for (var i = 0; i < withPos.length; i++) {
+      var item = withPos[i];
+      var row = rows.length ? rows[rows.length - 1] : null;
+      if (row && (item.y - row.y) <= READING_ORDER_ROW_TOLERANCE_PX) {
+        row.items.push(item);
+      } else {
+        rows.push({ y: item.y, items: [item] });
+      }
+    }
+
+    var ordered = [];
+    for (var r = 0; r < rows.length; r++) {
+      rows[r].items.sort(function(a, b) { return a.x - b.x; });
+      for (var j = 0; j < rows[r].items.length; j++) {
+        ordered.push(rows[r].items[j].id);
+      }
+    }
+    return ordered;
+  }
+
+  function togglePresentationMode() {
+    if (presentationModeActive) exitPresentationMode(); else enterPresentationMode();
+  }
+
+  function enterPresentationMode() {
+    if (presentationModeActive) return;
+    if (moodLockActive) exitMoodLock();
+    if (topModeActive) exitTopMode();
+    presentationModeActive = true;
+
+    var sidePanelWasOpen = (typeof KanvazSidePanel !== 'undefined' && KanvazSidePanel.isOpen && KanvazSidePanel.isOpen());
+    presentationRestore = { sidePanelWasOpen: sidePanelWasOpen };
+    if (sidePanelWasOpen) KanvazSidePanel.close();
+
+    var openMenu = document.getElementById('context-menu');
+    if (openMenu && typeof KanvazUI !== 'undefined' && KanvazUI.hideContextMenu) KanvazUI.hideContextMenu();
+
+    /* Closes a real gap the mousedown/contextmenu guards below can't:
+       a card selected BEFORE entering Presentation Mode is still a
+       valid target for a stray Delete/Ctrl+D/Ctrl+G keypress, which
+       route through shortcuts.js, not through cards.js's own mouse
+       handlers. Clearing selection on entry means every one of those
+       commands has nothing to act on (each already no-ops safely on an
+       empty selection, the same convention zoomToSelection's own
+       "nothing selected" fallback already relies on) — cheaper and
+       more certain than gating every individual keyboard shortcut. */
+    if (typeof KanvazCards !== 'undefined' && KanvazCards.deselectAll) KanvazCards.deselectAll();
+
+    presentationCardIds = readingOrderCardIds();
+    presentationIndex = -1;
+
+    document.body.classList.add('presentation-mode-active');
+    showPresentationBadge();
+
+    if (typeof KanvazCanvas !== 'undefined' && KanvazCanvas.zoomFit) KanvazCanvas.zoomFit();
+    KanvazUI.toast('Presentation Mode on — read-only, ←/→ to step through cards, Esc to exit');
+  }
+
+  function exitPresentationMode() {
+    if (!presentationModeActive) return;
+    presentationModeActive = false;
+
+    var r = presentationRestore || { sidePanelWasOpen: false };
+    presentationRestore = null;
+
+    if (r.sidePanelWasOpen && typeof KanvazSidePanel !== 'undefined' && KanvazSidePanel.toggle
+        && !(KanvazSidePanel.isOpen && KanvazSidePanel.isOpen())) {
+      KanvazSidePanel.toggle();
+    }
+
+    document.body.classList.remove('presentation-mode-active');
+    hidePresentationBadge();
+
+    KanvazUI.toast('Presentation Mode off');
+  }
+
+  /* dir is +1 (next) or -1 (previous), wraps around both ends.
+     zoomFit([id]) is the same instant (non-animated) framing every
+     other zoom action in this app already uses (recallViewBookmark,
+     zoomToSelection) — no new animation system introduced just for
+     this. */
+  function presentationStep(dir) {
+    if (!presentationModeActive || !presentationCardIds.length) return;
+    presentationIndex += dir;
+    if (presentationIndex < 0) presentationIndex = presentationCardIds.length - 1;
+    if (presentationIndex >= presentationCardIds.length) presentationIndex = 0;
+    var id = presentationCardIds[presentationIndex];
+    if (typeof KanvazCanvas !== 'undefined' && KanvazCanvas.zoomFit) KanvazCanvas.zoomFit([id]);
+  }
+
+  function showPresentationBadge() {
+    if (document.getElementById('presentation-mode-badge')) return;
+    var badge = document.createElement('div');
+    badge.id = 'presentation-mode-badge';
+    badge.textContent = 'Presentation Mode — ←/→ next/prev card, Esc to exit';
+    document.body.appendChild(badge);
+  }
+
+  function hidePresentationBadge() {
+    var badge = document.getElementById('presentation-mode-badge');
+    if (badge) badge.remove();
+  }
+
+  /* ── Save status ── */
+
+  function updateSaveStatus(state) {
+    var el = document.getElementById('status-save');
+    if (!el) return;
+    el.className = 'status-item';
+    if (state === 'saved') {
+      el.textContent = 'Saved';
+      el.classList.add('saved');
+    } else if (state === 'unsaved') {
+      el.textContent = 'Unsaved changes';
+      el.classList.add('unsaved');
+    } else if (state === 'saving') {
+      el.textContent = 'Saving…';
+    } else {
+      el.textContent = 'Ready';
+    }
+  }
+
+  /* ── Card count ── */
+
+  function updateCardCount(n) {
+    var el = document.getElementById('status-cards');
+    if (el) el.textContent = n;
+  }
+
+  /* ── Empty state ── */
+
+  function updateEmptyState(isEmpty) {
+    var el = document.getElementById('canvas-empty');
+    if (!el) return;
+    /* Bug fix (found live): this "Drop a 3D model, image, video, or GIF
+       here / Right-click for options..." hint is Board view's own
+       onboarding text, keyed only on card count — it never checked
+       which VIEW was actually active, so it kept showing (and catching
+       clicks/drags meant for the canvas underneath) in Map View and
+       Scratch Board too, on an otherwise-empty board. Those views have
+       their own affordances (Scratch's toolbar, Map's node layout) and
+       don't need — or want — Board's file-drop hint bleeding through. */
+    var otherViewActive =
+      (typeof KanvazMapView !== 'undefined' && KanvazMapView.isActive && KanvazMapView.isActive()) ||
+      (typeof KanvazScratchBoard !== 'undefined' && KanvazScratchBoard.isActive && KanvazScratchBoard.isActive());
+    if (isEmpty && !otherViewActive) {
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  }
+
+  /* ── Unsaved changes on close (BUG 1 fix) ── */
+
+  function handleCloseRequest() {
+    if (!boardDirty) {
+      KanvazBridge.clearRecovery();
+      KanvazBridge.forceClose();
+      return;
+    }
+
+    KanvazUI.showDialog(
+      'Unsaved changes',
+      'You have unsaved changes. Save before closing?',
+      [
+        {
+          label: 'Save',
+          cls: 'primary',
+          action: function() {
+            KanvazBoards.saveBoard(function(ok) {
+              if (ok) {
+                KanvazBridge.clearRecovery();
+                KanvazBridge.forceClose();
+              }
+              /* if save failed/was cancelled, saveBoard already toasted —
+                 leave the window open so the user can try again */
+            });
+          }
+        },
+        {
+          label: "Don't Save",
+          cls: 'danger',
+          action: function() {
+            KanvazBridge.clearRecovery();
+            KanvazBridge.forceClose();
+          }
+        },
+        {
+          label: 'Cancel',
+          cls: '',
+          action: function() {}
+        }
+      ]
+    );
+  }
+
+  /* ── Recovery dialog ──
+     v8.x polish: this used to show the exact same generic "Kanvaz
+     found an unsaved board... do you want to restore it?" regardless
+     of what was actually in the recovery file — the user had to click
+     Restore just to find out whether it was even the board they
+     wanted, with no clean way to back out if it wasn't (Discard, at
+     that point, throws away something already loaded). Now reads and
+     parses the recovery file FIRST, so the dialog's own message can
+     say specifically what it found (board count, total card count,
+     how long ago) — an actually informed decision, not a blind one.
+     "Restore" below reuses this already-parsed `data` rather than
+     reading the file a second time. */
+  function showRecoveryDialog() {
+    KanvazBridge.readRecovery().then(function(result) {
+      if (!result || !result.ok || !result.data) return; /* nothing real to recover — no dialog at all */
+
+      var data;
+      try {
+        data = JSON.parse(result.data);
+      } catch (e) {
+        /* Corrupt recovery file — still worth telling the user rather
+           than silently discarding it, but there's genuinely nothing
+           to restore, so no Restore/Discard choice makes sense either. */
+        KanvazUI.toast('Found a backup from a previous session, but it was corrupted and could not be restored.', 'error');
+        KanvazBridge.clearRecovery();
+        return;
+      }
+      if (!data || !Array.isArray(data.boards)) {
+        KanvazUI.toast('Found a backup from a previous session, but its format wasn\'t recognised.', 'error');
+        KanvazBridge.clearRecovery();
+        return;
+      }
+
+      var boardCount = data.boards.length;
+      var cardCount = 0;
+      for (var i = 0; i < data.boards.length; i++) {
+        if (data.boards[i] && Array.isArray(data.boards[i].cards)) cardCount += data.boards[i].cards.length;
+      }
+      var whenText = (result.mtimeMs && typeof KanvazBoards.formatRelativeTime === 'function')
+        ? KanvazBoards.formatRelativeTime(result.mtimeMs) : 'an earlier session';
+      var boardWord = boardCount === 1 ? 'board' : 'boards';
+      var cardWord  = cardCount === 1 ? 'card' : 'cards';
+      var message = 'Kanvaz found an unsaved board from ' + whenText + ' — ' +
+        boardCount + ' ' + boardWord + ', ' + cardCount + ' ' + cardWord + ' total. Restore it?';
+
+      KanvazUI.showDialog(
+        'Recover unsaved board?',
+        message,
+        [
+          {
+            label: 'Restore',
+            cls: 'primary',
+            action: function() {
+              KanvazBoards.loadFromJSON(data);
+              KanvazBridge.clearRecovery();
+              KanvazUI.toast('Board restored', 'success');
+              /* Recovery retains the saved view. */
+            }
+          },
+          {
+            label: 'Discard',
+            cls: 'danger',
+            action: function() {
+              KanvazBridge.clearRecovery();
+            }
+          }
+        ]
+      );
+    }).catch(function(e) { console.warn('[Kanvaz] readRecovery IPC failed:', e); });
+  }
+
+  /* ── Large file warning ── */
+
+  /* showLargeFileDialog removed — replaced by toast (hard block >500MB)
+     and inline Add/Cancel dialog (200-500MB warn tier) in handleDroppedFiles */
+
+  /* ── UI module (inline for Day 1, full ui.js comes Day 5) ── */
+
+  /* window.KanvazUI (toasts, dialogs, context menu, presentation/top
+     mode, PureRef drop handling) moved to app-ui.js (v9.7.0) — the
+     second piece split out of this file. Loaded as its own <script>
+     right after this one in index.html. */
+
+
+  /* Boot on DOMContentLoaded */
+  document.addEventListener('DOMContentLoaded', function() {
+    init();
+  });
+
+  /* ── PureRef import ── */
+
+  /* Bug fix: the toolbar's "Import" button used to call importPurFile()
+     — PureRef-only — even though nothing about the button (a generic
+     tray-and-arrow icon, the plain label "Import") signals that
+     narrowing, and Kanvaz already supports importing every media type
+     placeDroppedFiles() below handles (images/GIF/video/audio/3D
+     models). Direct feedback: "the import button is made for all kinds
+     of import regardless of format... via import button everything
+     which is supported in kanvaz will be imported." .pur import keeps
+     its own explicit "Import .pur file" entry in the canvas right-click
+     menu (commands.js/context menu, unchanged) for anyone who
+     specifically wants that. Reuses the exact same
+     KanvazMedia.loadFromFile → KanvazCards.createFromMedia pipeline a
+     real drag-and-drop already goes through — one path for "add these
+     files to the board," not a second copy. */
+  function importMediaFiles() {
+    KanvazBridge.importMediaDialog().then(function(paths) {
+      if (!paths || !paths.length) return;
+      var files = paths.map(function(p) {
+        var sep = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+        return { path: p, name: sep === -1 ? p : p.slice(sep + 1) };
+      });
+      var vp = (typeof KanvazCanvas !== 'undefined') ? KanvazCanvas.getViewport() : null;
+      var worldPos = vp
+        ? { x: (-vp.tx / vp.scale) + 200, y: (-vp.ty / vp.scale) + 200 }
+        : { x: 200, y: 200 };
+      placeDroppedFiles(files, worldPos);
+    }).catch(function(e) {
+      console.warn('[Kanvaz] importMediaDialog IPC failed:', e);
+      KanvazUI.toast('Could not open the file dialog', 'error');
+    });
+  }
+
+  function importPurFile() {
+    KanvazBridge.openPurDialog().then(function(purPath) {
+      if (!purPath) return;
+      KanvazUI.toast('Importing PureRef file…', 'success');
+      KanvazBridge.importPur(purPath).then(function(result) {
+        if (!result.ok) {
+          KanvazErrors.handle('LOAD_FAIL', result.error);
+          return;
+        }
+        if (result.count === 0) {
+          KanvazUI.toast('No images found in .pur file', 'error');
+          return;
+        }
+        placePurImages(result.images);
+      }).catch(function(e) {
+        KanvazErrors.handle('LOAD_FAIL', e);
+      });
+    }).catch(function(e) {
+      /* Audit fix: the outer openPurDialog() chain had no .catch at
+         all — every other promise chain in this file at least logs on
+         a transport-level rejection; this one was a genuine unhandled
+         rejection with zero logging and zero user feedback if the
+         dialog IPC call itself failed. */
+      console.warn('[Kanvaz] openPurDialog IPC failed:', e);
+      KanvazUI.toast('Could not open the file dialog', 'error');
+    });
+  }
+
+  function importPurFromPath(purPath) {
+    KanvazUI.toast('Importing PureRef file…', 'success');
+    KanvazBridge.importPur(purPath).then(function(result) {
+      if (!result.ok) {
+        KanvazErrors.handle('LOAD_FAIL', result.error);
+        return;
+      }
+      if (result.count === 0) {
+        KanvazUI.toast('No images found in .pur file', 'error');
+        return;
+      }
+      placePurImages(result.images);
+    }).catch(function(e) {
+      KanvazErrors.handle('LOAD_FAIL', e);
+    });
+  }
+
+  function placePurImages(images) {
+    var placed = 0;
+    var total = images.length;
+
+    for (var i = 0; i < total; i++) {
+      (function(img) {
+        /* Measure natural size from the dataUrl, then create card */
+        KanvazMedia.getNaturalSize(img.dataUrl, function(natW, natH) {
+          /* Apply PureRef scale */
+          var w = Math.round(Math.abs(natW * (img.scaleX || 1)));
+          var h = Math.round(Math.abs(natH * (img.scaleY || 1)));
+
+          /* Cap to reasonable size */
+          var sz = KanvazMedia.capSize(w, h);
+
+          var mediaResult = {
+            ok: true,
+            dataUrl: img.dataUrl,
+            name: img.name || 'pur-image',
+            type: 'image',
+            originalPath: null,
+            sizeMB: 0,
+            naturalW: natW,
+            naturalH: natH,
+            displayW: sz.w,
+            displayH: sz.h
+          };
+
+          KanvazCards.createFromMedia(mediaResult, { x: img.x, y: img.y });
+          placed++;
+
+          if (placed === total) {
+            KanvazApp.markDirty();
+            KanvazUI.toast(total + ' image' + (total > 1 ? 's' : '') + ' imported from PureRef', 'success');
+            setTimeout(function() { KanvazCanvas.zoomFit(); }, 200);
+          }
+        });
+      })(images[i]);
+    }
+  }
+
+  /* BUG 6 fix: push the current filename + dirty state to the OS-level
+     window title (taskbar, Alt-Tab preview). The #titlebar-title element
+     below only updates Kanvaz's own custom in-app titlebar — it never
+     touched the real window title, which stayed hardcoded to 'Kanvaz'. */
+  function updateWindowTitle() {
+    var name = currentBoardPath
+      ? currentBoardPath.split(/[\\/]/).pop()
+      : 'Untitled';
+    if (typeof KanvazBridge !== 'undefined' && KanvazBridge.setWindowTitle) {
+      KanvazBridge.setWindowTitle('Kanvaz — ' + name + (boardDirty ? ' *' : ''));
+    }
+  }
+
+  return {
+    toggleAlwaysOnTop: toggleAlwaysOnTop,
+    syncAlwaysOnTop:   syncAlwaysOnTop,
+    toggleTopMode:     toggleTopMode,
+    isTopModeActive:   isTopModeActive,
+    toggleMoodLock:    toggleMoodLock,
+    moodLockStep:      moodLockStep,
+    isMoodLockActive:  isMoodLockActive,
+    syncMoodLockControl: syncMoodLockControl,
+    noteSettingChangedDuringTopMode: noteSettingChangedDuringTopMode,
+    togglePresentationMode:  togglePresentationMode,
+    isPresentationModeActive: isPresentationModeActive,
+    presentationStep:  presentationStep,
+    /* Exposed for the side panel's "Quick drop" zone (boards.js) —
+       exact same file-drop handling path the main canvas drop target
+       already uses, just reached from a different DOM element. */
+    handleDroppedFiles: handleDroppedFiles,
+    updateSaveStatus:  updateSaveStatus,
+    updateCardCount:   updateCardCount,
+    updateEmptyState:  updateEmptyState,
+    getCurrentPath:    function() { return currentBoardPath; },
+    setCurrentPath:    function(p) {
+      if (p === currentBoardPath) return;
+      currentBoardPath = p;
+      /* boards.js's updateTitle() is the single authoritative writer of
+         #titlebar-title (also handles the unsaved-changes dot) — call
+         through to it instead of duplicating the DOM write here. */
+      if (typeof KanvazBoards !== 'undefined' && KanvazBoards.updateTitle) KanvazBoards.updateTitle();
+      updateWindowTitle();
+    },
+    markDirty:         function() {
+      /* No-op once already dirty — markDirty() is called from ~30 sites
+         across the app (most mutations), so skipping the DOM/title
+         refresh when nothing actually changed avoids needless repeated
+         work without changing behavior for the "just became dirty" case. */
+      if (boardDirty) return;
+      boardDirty = true;
+      updateSaveStatus('unsaved');
+      if (typeof KanvazBoards !== 'undefined' && KanvazBoards.updateTitle) KanvazBoards.updateTitle();
+      updateWindowTitle();
+    },
+    markClean:         function() {
+      if (!boardDirty) return;
+      boardDirty = false;
+      updateSaveStatus('saved');
+      if (typeof KanvazBoards !== 'undefined' && KanvazBoards.updateTitle) KanvazBoards.updateTitle();
+      updateWindowTitle();
+    },
+    isDirty:           function() { return boardDirty; },
+    importPurFile:     importPurFile,
+    /* Bug fix (found live, right after the app-ui.js split): showSearchBar/
+       hideSearchBar are a real, actively-used public contract — boards.js,
+       commands.js, and shortcuts.js all call KanvazUI.showSearchBar()/
+       hideSearchBar() directly. Both functions live here in KanvazApp's
+       own closure (part of the larger search-bar subsystem, not moved to
+       app-ui.js), but app-ui.js's own code also calls into them — exposed
+       here so app-ui.js can delegate through KanvazApp instead of reaching
+       into a closure it's no longer part of. */
+    showSearchBar:     showSearchBar,
+    hideSearchBar:     hideSearchBar,
+    applySearchFilter: applySearchFilter,
+    renderSmartFolderChips: renderSmartFolderChips,
+    positionMenuInViewport: positionMenuInViewport,
+    isSearchActive:    function() { return searchActive; },
+    /* DOM node reference, not a value copy — app-ui.js reads AND writes
+       .value on this (the smart-folder "Open" action pre-fills the
+       search box), so the caller needs the live element, not a snapshot. */
+    getSearchInput:    function() { return searchInput; },
+    importPurFromPath: importPurFromPath
+  };
+
+})();

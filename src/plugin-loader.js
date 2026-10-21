@@ -1,0 +1,504 @@
+/* plugin-loader.js — Kanvaz plugin manifest scanning + state management
+   (main process, CommonJS — same pattern as board-container.js / pur-import.js)
+
+   Sandbox model: convention-based, not iframe/worker-isolated. A plugin's
+   entry script runs in the renderer's normal page context (same trust
+   model as VS Code extensions), not physically walled off from other page
+   globals. What IS enforced here: a plugin only loads if its manifest is
+   valid and its declared permission set has been explicitly approved by
+   the user, and if a later version of an already-approved plugin asks
+   for MORE permissions than it was approved for, that's treated as
+   unapproved again — an old approval never silently covers an escalated
+   one. Every function here is defensive: a broken/malicious plugin.json
+   degrades that one plugin, it never crashes the app or the scan. */
+
+var fs = require('fs');
+var path = require('path');
+var url = require('url');
+var crypto = require('crypto');
+
+var PLUGIN_API_VERSION = 1;
+/* 'server' (4.4.0) — run a local listener external tools can connect to.
+   Different in kind from 'network' (outbound requests) and 'filesystem'
+   (read/write local files): a listener accepts INBOUND connections, which
+   is why it's its own permission rather than folded into 'network'. The
+   only official plugin declaring it today is MCP Bridge (see
+   official-plugins/mcp-bridge) — see plugin-api.js's buildScopedAPI() for
+   where this actually gates something (KanvazPluginAPI.mcpBridge is
+   simply absent from a plugin's own scoped API object unless its
+   manifest declares 'server'), and main.js's mcp-bridge-start handler for
+   the real, main-process-side re-check that backs it (never trust the
+   renderer's say-so alone — same pattern as plugins-set-enabled below).
+
+   HONEST LIMITATION, worth stating plainly here since the permission
+   name itself reads as generic: as implemented, only ONE specific
+   plugin id (main.js's MCP_BRIDGE_PLUGIN_ID) can actually start the
+   listener — this is single-tenant infrastructure built for one
+   official plugin, not a generic per-plugin local-server framework. A
+   third-party plugin CAN declare 'server', get approved, and see
+   KanvazPluginAPI.mcpBridge present on its own scoped API (this file
+   and buildScopedAPI() don't know or care about the id restriction) —
+   but calling .start() will fail with a clear, honest error explaining
+   why, rather than the vague permission-sounding error an earlier
+   draft of this shipped with. Building real multi-tenant support (each
+   plugin gets its own local endpoint) is real future work, not
+   attempted this pass. */
+var ALLOWED_PERMISSIONS = ['cardTypes', 'commands', 'network', 'filesystem', 'server'];
+var MANIFEST_FILE = 'plugin.json';
+var STATE_FILE = 'plugin-state.json';
+
+/* Human-readable descriptions shown in the native consent dialog (main
+   process) — kept here, not in the renderer, since the consent decision
+   itself is made main-process-side (see the security note above
+   approvePlugin() usage in main.js: the dialog text is always built
+   from a manifest main.js just re-read off disk, never from anything a
+   renderer passed in). */
+var PERMISSION_DESCRIPTIONS = {
+  cardTypes:  'add new card types to boards',
+  commands:   'add commands/actions you can run',
+  network:    'make network requests',
+  filesystem: 'read and write files on your computer',
+  server:     'run a local server other apps on this computer can connect to and control your board through'
+};
+
+function describePermissions(permissions) {
+  if (!permissions || !permissions.length) {
+    return 'nothing requiring special access (no network, no filesystem)';
+  }
+  return permissions.map(function(p) { return PERMISSION_DESCRIPTIONS[p] || p; }).join(', ');
+}
+
+function getPluginsDir(userDataPath) {
+  return path.join(userDataPath, 'plugins');
+}
+
+/* Redesign v1: which plugins are enabled is PER-PROFILE (plugin CODE
+   stays machine-wide — installing a plugin is a machine-level action,
+   see docs/PROFILES_SYSTEM_PLAN.md's "what a profile owns" section) —
+   so every state-touching function below takes a SEPARATE `statePath`
+   (the active profile's own directory) alongside `userDataPath` (still
+   used only for the shared plugins/ code folder). Callers that haven't
+   been updated for profiles yet can pass the same value for both —
+   state just lives at the userData root in that case, matching the
+   pre-profiles behavior exactly. */
+function getStatePath(statePath) {
+  return path.join(statePath, STATE_FILE);
+}
+
+function ensurePluginsDir(userDataPath) {
+  var dir = getPluginsDir(userDataPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+/* Ids that must never be usable as a plugin id — every state function
+   below does raw `state[pluginId]` bracket access, and on an ordinary
+   object `state["__proto__"] = {...}` reassigns the object's actual
+   prototype instead of creating an own key (real, standard JS
+   behavior). Found by the 2026-09-15 audit and confirmed still open
+   by the 2026-09-20 re-audit. Fixed two ways on purpose: readState()
+   below now returns a null-prototype object (so even a hand-edited
+   plugin-state.json or a renderer-supplied id can't reach
+   Object.prototype), AND validateManifest() rejects these ids outright
+   so a plugin can't even be installed under one. */
+var RESERVED_PLUGIN_IDS = ['__proto__', 'constructor', 'prototype'];
+
+function isReservedPluginId(id) {
+  return RESERVED_PLUGIN_IDS.indexOf(String(id)) !== -1;
+}
+
+function readState(statePath) {
+  var out = Object.create(null);
+  try {
+    var p = getStatePath(statePath);
+    if (!fs.existsSync(p)) return out;
+    var parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return out;
+    for (var k in parsed) {
+      if (Object.prototype.hasOwnProperty.call(parsed, k)) out[k] = parsed[k];
+    }
+    return out;
+  } catch (e) {
+    return out;
+  }
+}
+
+function writeState(statePath, state) {
+  var p = getStatePath(statePath);
+  var tmp = p + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
+  fs.renameSync(tmp, p);
+}
+
+/* Validates a raw parsed manifest object. Returns { ok: true } or
+   { ok: false, reason: '...' } — never throws, whatever garbage is
+   handed to it. */
+function validateManifest(manifest) {
+  if (!manifest || typeof manifest !== 'object') {
+    return { ok: false, reason: 'plugin.json is not a valid JSON object' };
+  }
+  if (typeof manifest.id !== 'string' || !manifest.id) {
+    return { ok: false, reason: 'missing required field: id' };
+  }
+  if (isReservedPluginId(manifest.id)) {
+    return { ok: false, reason: 'id "' + manifest.id + '" is reserved and cannot be used as a plugin id' };
+  }
+  if (typeof manifest.name !== 'string' || !manifest.name) {
+    return { ok: false, reason: 'missing required field: name' };
+  }
+  if (typeof manifest.version !== 'string' || !manifest.version) {
+    return { ok: false, reason: 'missing required field: version' };
+  }
+  if (typeof manifest.entry !== 'string' || !manifest.entry) {
+    return { ok: false, reason: 'missing required field: entry' };
+  }
+  if (typeof manifest.kanvazApiVersion !== 'number') {
+    return { ok: false, reason: 'missing required field: kanvazApiVersion' };
+  }
+  if (manifest.kanvazApiVersion !== PLUGIN_API_VERSION) {
+    return {
+      ok: false,
+      reason: 'requires Kanvaz plugin API v' + manifest.kanvazApiVersion +
+        ', this Kanvaz supports v' + PLUGIN_API_VERSION
+    };
+  }
+  if (manifest.permissions !== undefined) {
+    if (!Array.isArray(manifest.permissions)) {
+      return { ok: false, reason: 'permissions must be an array' };
+    }
+    for (var i = 0; i < manifest.permissions.length; i++) {
+      if (ALLOWED_PERMISSIONS.indexOf(manifest.permissions[i]) === -1) {
+        return { ok: false, reason: 'unknown permission: ' + manifest.permissions[i] };
+      }
+    }
+  }
+  /* entry must resolve to a plain file inside the plugin's own folder —
+     never an absolute path or one that walks out via "..". This is
+     checked again with a real resolved-path comparison in scanPlugins()
+     below; this is just the cheap syntactic rejection. */
+  if (path.isAbsolute(manifest.entry) || manifest.entry.split(/[\\/]/).indexOf('..') !== -1) {
+    return { ok: false, reason: 'entry must be a relative path within the plugin folder' };
+  }
+  return { ok: true };
+}
+
+/* Content hash of a plugin's whole folder (sorted relative paths + bytes).
+   Approval used to be bound only to id + version + permission list, so a
+   plugin folder whose CODE was swapped after approval (same id, same
+   version string, same permissions) stayed enabled with the user's old
+   consent, even though the consent dialog says an approved plugin has the
+   same access as Kanvaz itself. Now any change to any file re-asks.
+   Symlinks are refused (they could point at content outside the folder
+   that this hash never sees) and the walk is bounded so a hostile folder
+   can't stall the scan. Returns { hash } or { error }. */
+/* Limits sized from a real install: the official MCP Bridge folder ships its
+   own node_modules (3,500 files, 23 MB), and a first cut with a 2,000-file cap
+   marked it invalid (found live, 2026-09-20). node_modules is deliberately NOT
+   skipped: the entry could import code from it, and an unhashed folder would
+   be a place to hide a swap. */
+var HASH_MAX_FILES = 20000;
+var HASH_MAX_BYTES = 200 * 1024 * 1024;
+/* scanPlugins runs on every enable/list/open, so unchanged folders reuse the
+   previous result: the key is a hash of every file's path + size + mtime,
+   which is far cheaper than re-reading 23 MB. Any edit changes size or mtime
+   and forces a real re-hash. (A deliberate same-size, mtime-restored edit
+   could evade this cache within one app session; the approval dialog reads
+   the same hash, so it is bounded to that session.) */
+var hashCache = {};
+function hashPluginDir(dir) {
+  var files = [];
+  var total = 0;
+  var err = null;
+  function walk(d, rel) {
+    if (err) return;
+    var ents;
+    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { err = 'cannot read plugin folder'; return; }
+    ents.sort(function(a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
+    for (var i = 0; i < ents.length && !err; i++) {
+      var e = ents[i];
+      var r = rel ? rel + '/' + e.name : e.name;
+      var full = path.join(d, e.name);
+      if (e.isSymbolicLink()) { err = 'plugin contains a symlink (' + r + '), which cannot be verified'; return; }
+      if (e.isDirectory()) { walk(full, r); continue; }
+      if (!e.isFile()) continue;
+      var st;
+      try { st = fs.statSync(full); } catch (e2) { err = 'cannot read ' + r; return; }
+      files.push({ rel: r, full: full, size: st.size, mtime: st.mtimeMs });
+      if (files.length > HASH_MAX_FILES) { err = 'plugin has too many files to verify'; return; }
+    }
+  }
+  walk(dir, '');
+  if (err) return { error: err };
+  var sig = crypto.createHash('sha256');
+  for (var si = 0; si < files.length; si++) sig.update(files[si].rel + '\0' + files[si].size + '\0' + files[si].mtime + '\n');
+  var sigKey = dir + '|' + sig.digest('hex');
+  if (hashCache[sigKey]) return { hash: hashCache[sigKey] };
+  var h = crypto.createHash('sha256');
+  for (var i = 0; i < files.length; i++) {
+    var buf;
+    try { buf = fs.readFileSync(files[i].full); } catch (e) { return { error: 'cannot read ' + files[i].rel }; }
+    total += buf.length;
+    if (total > HASH_MAX_BYTES) return { error: 'plugin is too large to verify' };
+    h.update(files[i].rel + '\0' + buf.length + '\0');
+    h.update(buf);
+  }
+  var digest = h.digest('hex');
+  hashCache[sigKey] = digest;
+  return { hash: digest };
+}
+
+/* Scans the plugins directory. Returns an array of descriptors, each
+   either { valid:true, ... } or { valid:false, reason:'...' }. A broken
+   plugin.json never stops the others from loading and never throws. */
+function scanPlugins(userDataPath, statePath) {
+  var dir = ensurePluginsDir(userDataPath);
+  var state = readState(statePath || userDataPath);
+  var results = [];
+
+  var entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (e) {
+    return results;
+  }
+
+  var resolvedPluginsDir = path.resolve(dir) + path.sep;
+
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    if (!entry.isDirectory()) continue;
+
+    var pluginDir = path.join(dir, entry.name);
+    var manifestPath = path.join(pluginDir, MANIFEST_FILE);
+
+    if (!fs.existsSync(manifestPath)) {
+      results.push({ folder: entry.name, valid: false, reason: 'no plugin.json found' });
+      continue;
+    }
+
+    var manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch (e) {
+      results.push({ folder: entry.name, valid: false, reason: 'plugin.json is not valid JSON' });
+      continue;
+    }
+
+    var validation = validateManifest(manifest);
+    if (!validation.ok) {
+      results.push({ folder: entry.name, valid: false, reason: validation.reason, manifest: manifest });
+      continue;
+    }
+
+    var entryPath = path.join(pluginDir, manifest.entry);
+    var resolvedEntry = path.resolve(entryPath);
+
+    /* Real containment check — validateManifest already rejected an
+       obviously-escaping entry field syntactically, this catches any
+       remaining edge case (symlinks, odd separators) by comparing the
+       fully resolved path against the plugins root. */
+    if (resolvedEntry.indexOf(resolvedPluginsDir) !== 0) {
+      results.push({ folder: entry.name, valid: false, reason: 'entry resolves outside its plugin folder', manifest: manifest });
+      continue;
+    }
+
+    if (!fs.existsSync(resolvedEntry)) {
+      results.push({ folder: entry.name, valid: false, reason: 'entry file "' + manifest.entry + '" not found', manifest: manifest });
+      continue;
+    }
+
+    var hashed = hashPluginDir(pluginDir);
+    if (hashed.error) {
+      results.push({ folder: entry.name, valid: false, reason: hashed.error, manifest: manifest });
+      continue;
+    }
+
+    var pluginState = state[manifest.id];
+    var approvedPermissions = (pluginState && pluginState.approvedPermissions) || [];
+    var everApproved = !!(pluginState && pluginState.approvedVersion);
+    var requestedPermissions = manifest.permissions || [];
+    var hasNewPermission = requestedPermissions.some(function(p) {
+      return approvedPermissions.indexOf(p) === -1;
+    });
+    /* Consent is bound to the exact code that was reviewed: version AND the
+       content hash must both match what was approved. An approval recorded
+       before hashes existed has no approvedHash, so it is asked once more. */
+    var changedSinceApproval = !!pluginState && (pluginState.approvedVersion !== manifest.version || pluginState.approvedHash !== hashed.hash);
+    var needsConsent = !everApproved || hasNewPermission || changedSinceApproval;
+    var enabled = !!(pluginState && pluginState.enabled) && !needsConsent;
+
+    results.push({
+      folder: entry.name,
+      valid: true,
+      manifest: manifest,
+      dir: pluginDir,
+      entryPath: resolvedEntry,
+      entryUrl: url.pathToFileURL(resolvedEntry).href,
+      enabled: enabled,
+      needsConsent: needsConsent,
+      changedSinceApproval: everApproved && changedSinceApproval,
+      contentHash: hashed.hash,
+      approvedPermissions: approvedPermissions
+    });
+  }
+
+  return results;
+}
+
+/* Records that the user approved a plugin at a given version with a
+   given permission set, and enables it. */
+function approvePlugin(statePath, pluginId, version, permissions, contentHash) {
+  if (isReservedPluginId(pluginId)) return;
+  var state = readState(statePath);
+  state[pluginId] = {
+    enabled: true,
+    approvedPermissions: permissions || [],
+    approvedVersion: version,
+    approvedHash: contentHash || null
+  };
+  writeState(statePath, state);
+}
+
+function setEnabled(statePath, pluginId, enabled) {
+  if (isReservedPluginId(pluginId)) return;
+  var state = readState(statePath);
+  if (!state[pluginId]) return;
+  state[pluginId].enabled = !!enabled;
+  writeState(statePath, state);
+}
+
+/* Removes a plugin's own folder only. pluginFolder must resolve to a
+   direct descendant of the plugins directory — blocks a crafted folder
+   name from ever deleting anything outside it, and refuses to delete
+   the plugins directory itself if pluginFolder is empty/'.'/'..'. */
+function removePlugin(userDataPath, statePath, pluginFolder, pluginId) {
+  var dir = getPluginsDir(userDataPath);
+  var target = path.join(dir, pluginFolder || '');
+
+  var resolvedDir = path.resolve(dir) + path.sep;
+  var resolvedTarget = path.resolve(target);
+
+  if ((resolvedTarget + path.sep).indexOf(resolvedDir) !== 0 || resolvedTarget + path.sep === resolvedDir) {
+    return { ok: false, error: 'refused to remove a path outside the plugins directory' };
+  }
+
+  try {
+    fs.rmSync(resolvedTarget, { recursive: true, force: true });
+    if (pluginId) {
+      var state = readState(statePath);
+      if (state[pluginId]) {
+        delete state[pluginId];
+        writeState(statePath, state);
+      }
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/* ── Per-plugin persistent storage ──
+   One small JSON blob per plugin, namespaced by its manifest id, for
+   things like the Theme Creator's saved presets. encodeURIComponent()
+   turns any '/' or '..' in a crafted id into literal, harmless
+   characters (e.g. "%2F", "%2E%2E") rather than real path separators,
+   so the resulting filename can never escape the storage directory —
+   confirmed with a real resolved-path containment check below anyway,
+   same defense-in-depth pattern used everywhere else in this file. */
+function getPluginStorageDir(userDataPath) {
+  return path.join(userDataPath, 'plugin-storage');
+}
+
+function getPluginStoragePath(userDataPath, pluginId) {
+  var dir = getPluginStorageDir(userDataPath);
+  var fileName = encodeURIComponent(String(pluginId)) + '.json';
+  var target = path.join(dir, fileName);
+
+  var resolvedDir = path.resolve(dir) + path.sep;
+  var resolvedTarget = path.resolve(target);
+  if (resolvedTarget.indexOf(resolvedDir) !== 0) {
+    return null; /* should be unreachable given encodeURIComponent, kept as a hard backstop */
+  }
+  return resolvedTarget;
+}
+
+function readPluginStorage(userDataPath, pluginId) {
+  var storagePath = getPluginStoragePath(userDataPath, pluginId);
+  if (!storagePath) return {};
+  try {
+    if (!fs.existsSync(storagePath)) return {};
+    return JSON.parse(fs.readFileSync(storagePath, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+
+/* Generous but real cap — protects against a runaway/misbehaving plugin
+   (or one deliberately abusing storage.save in a tight loop, see the
+   4.2.0 audit's note above plugins-storage-set in main.js) freezing the
+   main process on a giant synchronous-feeling write or slowly filling
+   the disk. Presets/settings-shaped data is nowhere near this size. */
+var MAX_PLUGIN_STORAGE_BYTES = 5 * 1024 * 1024; /* 5MB */
+
+function writePluginStorage(userDataPath, pluginId, data) {
+  var storagePath = getPluginStoragePath(userDataPath, pluginId);
+  if (!storagePath) return Promise.resolve({ ok: false, error: 'invalid plugin id' });
+
+  var json;
+  try {
+    json = JSON.stringify(data);
+  } catch (e) {
+    /* e.g. a circular structure — fails synchronously and safely here,
+       never reaches disk I/O. */
+    return Promise.resolve({ ok: false, error: 'data could not be saved: ' + e.message });
+  }
+  if (Buffer.byteLength(json, 'utf8') > MAX_PLUGIN_STORAGE_BYTES) {
+    return Promise.resolve({
+      ok: false,
+      error: 'storage write rejected — exceeds the ' + (MAX_PLUGIN_STORAGE_BYTES / (1024 * 1024)) + 'MB per-plugin limit'
+    });
+  }
+
+  var dir = getPluginStorageDir(userDataPath);
+  /* Unique per-call tmp name (pid + high-res time), not just
+     "<file>.tmp" — this write is now async (fs.promises), matching
+     every other write path in main.js, so unlike the old synchronous
+     version the event loop CAN yield mid-write; two overlapping saves
+     for the same plugin must not be able to collide on one shared tmp
+     path and corrupt each other. */
+  var tmp = storagePath + '.' + process.pid + '.' + Date.now() + '.' + Math.random().toString(36).slice(2) + '.tmp';
+
+  return Promise.resolve()
+    .then(function() {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      return fs.promises.writeFile(tmp, json, 'utf8');
+    })
+    .then(function() {
+      return fs.promises.rename(tmp, storagePath);
+    })
+    .then(function() {
+      return { ok: true };
+    })
+    .catch(function(e) {
+      try { fs.unlinkSync(tmp); } catch (_) {}
+      return { ok: false, error: e.message };
+    });
+}
+
+module.exports = {
+  PLUGIN_API_VERSION: PLUGIN_API_VERSION,
+  ALLOWED_PERMISSIONS: ALLOWED_PERMISSIONS,
+  getPluginsDir: getPluginsDir,
+  ensurePluginsDir: ensurePluginsDir,
+  validateManifest: validateManifest,
+  scanPlugins: scanPlugins,
+  approvePlugin: approvePlugin,
+  setEnabled: setEnabled,
+  hashPluginDir: hashPluginDir,
+  removePlugin: removePlugin,
+  describePermissions: describePermissions,
+  readPluginStorage: readPluginStorage,
+  writePluginStorage: writePluginStorage
+};

@@ -1,0 +1,363 @@
+/* link-server.js — the narrow local listener a companion program (the Kanvaz
+   Link add-on for Blender) uses to hand a 3D model to Kanvaz.
+
+   Deliberately much smaller than the MCP Bridge:
+     - four methods only: hello, deliver, status, ping. No pass-through to
+       the renderer, no generic dispatch.
+     - a 64 KB line cap (a delivery names a FILE, it never carries bytes).
+     - a per-start token on every request, plus an HMAC "proof" in the hello
+       reply so the client can tell it reached the real app and not something
+       that grabbed the endpoint first.
+     - nothing is accepted until the user has answered a native consent
+       dialog for that client (asked by main.js, never by the renderer).
+     - a bounded number of connections and queued deliveries.
+   Files are NOT read here. The delivery is handed to main.js, which reads it
+   through path-guard.readDropFile() from Kanvaz's private drop directory.
+
+   Honest scope, same as mcp-auth.js: the token and consent stop other users,
+   sandboxed apps and a confused client. They do NOT stop malware already
+   running as the same user, which can read the discovery file and write to the
+   drop directory.
+
+   Node-only (no electron require) so test/link-server-test.js can drive it
+   over a real named pipe / Unix socket. ES5/var-only like the rest of src/. */
+
+'use strict';
+
+var net = require('net');
+var fs = require('fs');
+var os = require('os');
+var path = require('path');
+var crypto = require('crypto');
+var mcpAuth = require('./mcp-auth');
+var pathGuard = require('./path-guard');
+
+var PROTOCOL = 1;
+var MAX_LINE_BYTES = 64 * 1024;
+var MAX_CONNECTIONS = 4;
+var MAX_QUEUED = 8;
+var MAX_TRACKED = 50;
+var IDLE_TIMEOUT_MS = 60 * 1000;
+var AUTH_TIMEOUT_MS = 5 * 1000;     /* a connection must prove it has the token within this */
+var DISCOVERY_FILE = 'link.json';
+var METHODS = ['hello', 'deliver', 'status', 'ping'];
+var FORMATS = ['glb', 'gltf', 'obj', 'fbx'];
+
+/* ── small validators ─────────────────────────────────────── */
+
+function isObj(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+function isStr(v, max) { return typeof v === 'string' && v.length > 0 && v.length <= (max || 256) && v.indexOf('\0') === -1; }
+function isNum(v) { return typeof v === 'number' && isFinite(v); }
+function isVec(v) { return isObj(v) && isNum(v.x) && isNum(v.y) && isNum(v.z); }
+
+/* A program's self-chosen name, made safe to compare, store and show:
+   Unicode-normalised, control and invisible formatting characters (bidi
+   overrides, zero-width joiners) removed, whitespace collapsed, at most 64
+   characters. Two names that look the same to a person now ARE the same, so a
+   denied program cannot come back as "Name " or "name" or with a hidden
+   character, and a name cannot dress itself up in the consent dialog. */
+function normalizeName(v) {
+  if (typeof v !== 'string') return 'unknown client';
+  var s = v;
+  try { s = s.normalize('NFKC'); } catch (e) { /* keep as is */ }
+  s = s.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0]/g, '');
+  s = s.replace(/\s+/g, ' ').trim().slice(0, 64);
+  return s || 'unknown client';
+}
+
+/* Strips anything that is not a plain file name and bounds its length. */
+function cleanName(v) {
+  var s = String(v || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/^\.+/, '').slice(0, 120);
+  return s || 'Blender export';
+}
+
+/* ── discovery + endpoint helpers ─────────────────────────── */
+
+/* Per-user endpoint. Windows: a named pipe whose name embeds a hash of this
+   install's data directory (two users, or two installs, never collide).
+   POSIX: a socket inside a 0700 directory; if the path would be too long for
+   sun_path (about 104 on macOS) it moves under the OS temp dir. */
+function defaultEndpoint(platform, dataDir) {
+  var h = crypto.createHash('sha256').update(String(dataDir)).digest('hex').slice(0, 12);
+  if (platform === 'win32') return '\\\\.\\pipe\\kanvaz-link-' + h;
+  var p = path.join(dataDir, 'link.sock');
+  if (p.length > 100) {
+    var uid = typeof process.getuid === 'function' ? process.getuid() : 'u';
+    p = path.join(os.tmpdir(), 'kanvaz-link-' + uid + '-' + h, 'link.sock');
+  }
+  return p;
+}
+
+function discoveryPath(dataDir) { return path.join(dataDir, DISCOVERY_FILE); }
+
+/* Atomic (tmp + rename) and 0600, written only once listen() has succeeded so
+   a client never reads an endpoint nothing is listening on. */
+function writeDiscovery(dataDir, info) {
+  var target = discoveryPath(dataDir);
+  var tmp = target + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(info), { encoding: 'utf8', mode: 384 });
+  fs.renameSync(tmp, target);
+  return target;
+}
+
+function removeDiscovery(dataDir) {
+  try { fs.unlinkSync(discoveryPath(dataDir)); } catch (e) { /* already gone */ }
+}
+
+/* HMAC the client can recompute from the token it read out of the discovery
+   file. Only someone holding the token can produce it. */
+function serverProof(token, nonce) {
+  return crypto.createHmac('sha256', token).update('kanvaz-link-v1|' + nonce).digest('hex');
+}
+
+/* ── the protocol, independent of any socket ──────────────── */
+
+/* deps:
+     token          per-start token (string)
+     dropDir        absolute path clients must write into
+     appVersion     string
+     capabilities() -> object advertised in hello
+     getConsent(clientName) -> 'granted' | 'denied' | 'unknown'
+     requestConsent(clientName, cb) -> asks the user (native dialog in main)
+     onDeliver(delivery) -> { state:'queued' } | { state:'rejected', reason }
+   Returns { handle(req) -> response object, setResult(id, result), ... } */
+function createProtocol(deps) {
+  var pending = Object.create(null);   /* client name -> consent being asked */
+  var tracked = Object.create(null);   /* deliveryId -> record */
+  var order = [];
+  var queued = 0;
+
+  function remember(rec) {
+    tracked[rec.deliveryId] = rec;
+    order.push(rec.deliveryId);
+    while (order.length > MAX_TRACKED) delete tracked[order.shift()];
+  }
+
+  function consentState(name) {
+    var st = deps.getConsent(name);
+    if (st === 'granted' || st === 'denied') return st;
+    if (!pending[name]) {
+      pending[name] = true;
+      deps.requestConsent(name, function() { pending[name] = false; });
+    }
+    return 'pending';
+  }
+
+  function err(id, code, message) { return { id: id, ok: false, error: code, message: message }; }
+
+  function hello(req) {
+    var client = isObj(req.client) ? req.client : {};
+    var name = normalizeName(client.name);
+    if (!isStr(req.nonce, 128) || !/^[0-9a-fA-F]{16,128}$/.test(req.nonce)) {
+      return err(req.id, 'bad-request', 'hello needs a hex nonce of 16 to 128 characters');
+    }
+    return {
+      id: req.id, ok: true, protocol: PROTOCOL, appVersion: deps.appVersion,
+      capabilities: deps.capabilities(),
+      consent: consentState(name),
+      dropDir: deps.dropDir,
+      proof: serverProof(deps.token, req.nonce)
+    };
+  }
+
+  function deliver(req) {
+    var client = isObj(req.client) ? req.client : {};
+    var name = normalizeName(client.name);
+    var cs = consentState(name);
+    if (cs === 'pending') return { id: req.id, ok: false, state: 'awaiting-consent', reason: 'The user has not answered the permission prompt yet.' };
+    if (cs !== 'granted') return { id: req.id, ok: false, state: 'rejected', reason: 'The user has not allowed this program to send models.' };
+
+    var caps = deps.capabilities();
+    var dl = caps && caps.deliver ? caps.deliver : {};
+    var formats = dl.formats || FORMATS;
+    var maxBytes = dl.maxBytes || 0;
+
+    if (!isStr(req.path, 1024) || !pathGuard.isLocalAbsolutePath(req.path)) return err(req.id, 'bad-request', 'path must be a local absolute path');
+    var rel = path.relative(path.resolve(deps.dropDir), path.resolve(req.path));
+    if (!rel || rel.indexOf('..') === 0 || path.isAbsolute(rel)) return err(req.id, 'bad-request', 'path is outside the drop directory');
+    if (!isStr(req.format, 8) || formats.indexOf(String(req.format).toLowerCase()) === -1) return err(req.id, 'unsupported-format', 'format is not supported by this Kanvaz');
+    if (!Number.isInteger(req.sizeBytes) || req.sizeBytes <= 0) return err(req.id, 'bad-request', 'sizeBytes must be a positive integer');
+    if (maxBytes && req.sizeBytes > maxBytes) return err(req.id, 'too-large', 'larger than the ' + maxBytes + ' byte limit this Kanvaz advertises');
+    if (req.sha256 !== undefined && !(typeof req.sha256 === 'string' && /^[0-9a-fA-F]{64}$/.test(req.sha256))) return err(req.id, 'bad-request', 'sha256 must be 64 hex characters');
+    if (queued >= MAX_QUEUED) return err(req.id, 'busy', 'too many deliveries are waiting');
+
+    var d = {
+      deliveryId: crypto.randomBytes(8).toString('hex'),
+      client: name,
+      path: req.path,
+      format: String(req.format).toLowerCase(),
+      name: cleanName(req.name),
+      sizeBytes: req.sizeBytes,
+      sha256: req.sha256 ? req.sha256.toLowerCase() : null,
+      animationClip: (isObj(req.animation) && Number.isInteger(req.animation.clip) && req.animation.clip >= 0 && req.animation.clip < 1000) ? req.animation.clip : 0,
+      cameraPosition: (isObj(req.camera) && isVec(req.camera.position) && isVec(req.camera.target)) ? { x: req.camera.position.x, y: req.camera.position.y, z: req.camera.position.z } : null,
+      cameraTarget: (isObj(req.camera) && isVec(req.camera.position) && isVec(req.camera.target)) ? { x: req.camera.target.x, y: req.camera.target.y, z: req.camera.target.z } : null,
+      bgColor: (typeof req.bgColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(req.bgColor)) ? req.bgColor : null,
+      upAxis: (req.upAxis === 'y' || req.upAxis === 'z') ? req.upAxis : null,
+      source: isObj(req.source) ? {
+        app: isStr(req.source.app, 32) ? req.source.app : null,
+        version: isStr(req.source.version, 32) ? req.source.version : null,
+        objectId: isStr(req.source.objectId, 64) ? req.source.objectId : null
+      } : null
+    };
+    var rec = { deliveryId: d.deliveryId, state: 'queued', reason: null, cardId: null };
+    var res = deps.onDeliver(d);
+    if (!res || res.state !== 'queued') {
+      rec.state = 'rejected';
+      rec.reason = (res && res.reason) || 'rejected';
+      remember(rec);
+      return { id: req.id, ok: false, deliveryId: d.deliveryId, state: 'rejected', reason: rec.reason };
+    }
+    queued++;
+    remember(rec);
+    return { id: req.id, ok: true, deliveryId: d.deliveryId, state: 'queued' };
+  }
+
+  function status(req) {
+    if (!isStr(req.deliveryId, 32)) return err(req.id, 'bad-request', 'deliveryId is required');
+    var rec = tracked[req.deliveryId];
+    if (!rec) return err(req.id, 'unknown-delivery', 'no such delivery');
+    return { id: req.id, ok: true, deliveryId: rec.deliveryId, state: rec.state, reason: rec.reason, cardId: rec.cardId };
+  }
+
+  return {
+    handle: function(req) {
+      if (!isObj(req)) return err(null, 'bad-request', 'a request must be a JSON object');
+      /* The token is checked first and on every request. The caller closes
+         the connection when this comes back as 'unauthorized'. */
+      if (!mcpAuth.verifyToken(req.token, deps.token)) return { id: req.id === undefined ? null : req.id, ok: false, error: 'unauthorized' };
+      var id = (typeof req.id === 'string' || typeof req.id === 'number') ? req.id : null;
+      req.id = id;
+      if (METHODS.indexOf(req.method) === -1) return err(id, 'unsupported', 'unknown method');
+      if (req.method === 'ping') return { id: id, ok: true, pong: true };
+      if (req.method === 'hello') return hello(req);
+      if (req.method === 'deliver') return deliver(req);
+      return status(req);
+    },
+    /* main.js reports the outcome once the renderer has (or has not) placed
+       the model. Ignored for unknown ids. */
+    setResult: function(deliveryId, result) {
+      var rec = tracked[deliveryId];
+      if (!rec || !isObj(result)) return false;
+      if (rec.state === 'queued') queued = Math.max(0, queued - 1);
+      rec.state = result.state === 'placed' ? 'placed' : 'rejected';
+      rec.reason = result.reason ? String(result.reason).slice(0, 200) : null;
+      rec.cardId = result.cardId ? String(result.cardId).slice(0, 80) : null;
+      return true;
+    },
+    stats: function() { return { queued: queued, tracked: order.length }; }
+  };
+}
+
+/* ── the socket server ────────────────────────────────────── */
+
+function createServer(opts) {
+  var protocol = createProtocol(opts.deps);
+  var server = null;
+  var conns = [];
+
+  function send(sock, obj) {
+    try { sock.write(JSON.stringify(obj) + '\n'); } catch (e) { /* peer gone */ }
+  }
+
+  function onConnection(sock) {
+    if (conns.length >= MAX_CONNECTIONS) { sock.destroy(); return; }
+    conns.push(sock);
+    sock.setEncoding('utf8');
+    /* Nothing counts as activity until a request carries the right token: an
+       unauthenticated peer gets AUTH_TIMEOUT_MS, then is dropped, so it cannot
+       sit on the (few) connection slots and lock the real client out. */
+    var authed = false, idleTimer = null;
+    var authTimer = setTimeout(function() { if (!authed) sock.destroy(); }, opts.authTimeoutMs || AUTH_TIMEOUT_MS);
+    function touch() { clearTimeout(idleTimer); idleTimer = setTimeout(function() { sock.destroy(); }, IDLE_TIMEOUT_MS); }
+    var buf = '';
+    sock.on('data', function(chunk) {
+      buf += chunk;
+      /* Cap the pending (unterminated) line, not the whole stream. */
+      if (buf.length > MAX_LINE_BYTES && buf.indexOf('\n') === -1) { sock.destroy(); return; }
+      var nl;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        var line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (line.length > MAX_LINE_BYTES) { sock.destroy(); return; }
+        if (!line.trim()) continue;
+        var req;
+        try { req = JSON.parse(line); } catch (e) { send(sock, { ok: false, error: 'bad-json' }); sock.destroy(); return; }
+        var res = protocol.handle(req);
+        if (res && res.error !== 'unauthorized') { authed = true; clearTimeout(authTimer); touch(); }
+        send(sock, res);
+        if (res && res.error === 'unauthorized') { sock.end(); return; }
+      }
+    });
+    sock.on('error', function() { /* a broken client must never crash Kanvaz */ });
+    sock.on('close', function() {
+      clearTimeout(authTimer);
+      clearTimeout(idleTimer);
+      var i = conns.indexOf(sock);
+      if (i !== -1) conns.splice(i, 1);
+    });
+  }
+
+  return {
+    protocol: protocol,
+    /* cb(err). Removes a stale POSIX socket first, keeps its directory 0700
+       and the socket 0600. Windows: a named pipe. Measured, not assumed: Node
+       still leaves Everyone and Anonymous with READ access to it (the
+       readableAll/writableAll flags do not remove that), so another account can
+       open the pipe. What it cannot do is pass the token check, and it is
+       dropped after AUTH_TIMEOUT_MS if it does not. */
+    start: function(cb) {
+      if (server) { cb(null); return; }
+      var ep = opts.endpoint;
+      var posix = process.platform !== 'win32';
+      if (posix) {
+        try {
+          fs.mkdirSync(path.dirname(ep), { recursive: true, mode: 448 });
+          fs.chmodSync(path.dirname(ep), 448);
+          try { fs.unlinkSync(ep); } catch (e) { /* none */ }
+        } catch (e) { cb(e); return; }
+      }
+      var s = net.createServer(onConnection);
+      var failed = false;
+      s.once('error', function(e) { failed = true; cb(e); });
+      s.listen({ path: ep, readableAll: false, writableAll: false }, function() {
+        if (failed) return;
+        if (posix) { try { fs.chmodSync(ep, 384); } catch (e) { /* best effort */ } }
+        server = s;
+        s.removeAllListeners('error');
+        s.on('error', function() { /* keep running */ });
+        cb(null);
+      });
+    },
+    stop: function(cb) {
+      var s = server;
+      server = null;
+      for (var i = 0; i < conns.length; i++) { try { conns[i].destroy(); } catch (e) { /* closed */ } }
+      conns = [];
+      if (!s) { if (cb) cb(); return; }
+      s.close(function() {
+        if (process.platform !== 'win32') { try { fs.unlinkSync(opts.endpoint); } catch (e) { /* gone */ } }
+        if (cb) cb();
+      });
+    },
+    isRunning: function() { return !!server; }
+  };
+}
+
+module.exports = {
+  PROTOCOL: PROTOCOL,
+  MAX_LINE_BYTES: MAX_LINE_BYTES,
+  MAX_CONNECTIONS: MAX_CONNECTIONS,
+  MAX_QUEUED: MAX_QUEUED,
+  METHODS: METHODS,
+  FORMATS: FORMATS,
+  defaultEndpoint: defaultEndpoint,
+  discoveryPath: discoveryPath,
+  writeDiscovery: writeDiscovery,
+  removeDiscovery: removeDiscovery,
+  serverProof: serverProof,
+  cleanName: cleanName,
+  normalizeName: normalizeName,
+  createProtocol: createProtocol,
+  createServer: createServer
+};

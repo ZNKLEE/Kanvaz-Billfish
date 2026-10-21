@@ -1,0 +1,3973 @@
+/* main.css — Kanvaz full design system */
+
+/* ── Variables ── */
+:root {
+  --color-canvas:    #0E0E10;
+  --color-chrome:    #131318;
+  --color-surface:   #1A1A22;
+  --color-surface-rgb: 26, 26, 34;
+  --color-surface-2: #22222C;
+  --color-surface-3: #2A2A35;
+  --color-border:    #2E2E3A;
+  --color-border-2:  #3A3A48;
+  --color-port:      #1A1A28;
+
+  --color-accent:    #9D7FFF;
+  --color-accent-rgb: 157, 127, 255;
+  --color-accent-dim:#7C5CFC;
+  --color-accent-bg: rgba(157, 127, 255, 0.14);
+  --color-amber:     #F0A500;
+  --color-amber-bg:  rgba(240, 165, 0, 0.12);
+  --color-red:       #FF5A5A;
+  --color-red-bg:    rgba(255, 90, 90, 0.12);
+  --color-green:     #4CAF82;
+
+  --color-text:      #DCDCE8;
+  --color-text-2:    #A0A0B8;
+  --color-text-3:    #8A8AAC;
+  --color-text-inv:  #0E0E10;
+
+  --color-shadow:    rgba(0, 0, 0, 0.5);
+  --color-overlay:   rgba(0, 0, 0, 0.6);
+  --color-bg:        var(--color-canvas);
+
+  /* v5.2.0 — the 5 rules this replaces used to live only as hardcoded
+     [data-theme="light"]-scoped overrides (see the removed comment
+     below), invisible to any plugin theme since a plugin sets its own
+     data-theme id, never the literal string "light". Promoting them to
+     real variables — defined here (dark defaults) and redefined in the
+     light theme's own block below — means a plugin theme with a light
+     background can now correctly override them too, the same way it
+     already can for every --color-* token (see Theme Creator's
+     buildThemeCss()). Values below are byte-identical to what the old
+     hardcoded dark-path rules used, so this is a mechanism change only —
+     zero visual difference for the two built-in themes. */
+  --shadow-card:           0 2px 12px rgba(0, 0, 0, 0.5);
+  --shadow-card-selected:  0 2px 12px rgba(0, 0, 0, 0.5), 0 0 0 4px var(--color-accent-bg);
+  --shadow-context-menu:   0 10px 32px var(--color-shadow);
+  --shadow-toggle-active:  0 1px 3px rgba(0, 0, 0, 0.3);
+  --tint-hover:            var(--color-surface-2);
+
+  --font-ui:   system-ui, 'Segoe UI', Arial, sans-serif;
+  --font-mono: Consolas, 'Courier New', monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  /* Redesign v1 Phase 3 (card visual polish) — cards get their own,
+     larger radius rather than reusing --radius-md, which stays as-is
+     for buttons/dialogs/inputs everywhere else in the app. Matches the
+     rounder, more "product" card look from the design reference. */
+  --radius-card: 14px;
+
+  --titlebar-h: 36px;
+  --statusbar-h: 26px;
+  --toolbar-h: 44px;
+}
+
+/* ── Light theme ── */
+:root[data-theme="light"] {
+  --color-canvas:    #F0F0F4;
+  --color-chrome:    #E8E8EE;
+  --color-surface:   #FFFFFF;
+  --color-surface-rgb: 255, 255, 255;
+  --color-surface-2: #F5F5F8;
+  --color-surface-3: #ECECF0;
+  --color-border:    #D4D4DC;
+  --color-border-2:  #C0C0CC;
+  --color-port:      #DCDCE4;
+
+  --color-accent:    #2B7FD4;
+  --color-accent-rgb: 43, 127, 212;
+  --color-accent-dim:#1F6AB8;
+  --color-accent-bg: rgba(43, 127, 212, 0.10);
+  --color-amber:     #D08F00;
+  --color-amber-bg:  rgba(208, 143, 0, 0.10);
+  --color-red:       #D93636;
+  --color-red-bg:    rgba(217, 54, 54, 0.10);
+  --color-green:     #2E8B5E;
+
+  --color-text:      #1A1A2E;
+  --color-text-2:    #4A4A64;
+  --color-text-3:    #5C5C78;
+  --color-text-inv:  #FFFFFF;
+
+  --color-shadow:    rgba(0, 0, 0, 0.12);
+  --color-overlay:   rgba(0, 0, 0, 0.25);
+
+  /* v5.2.0 — light-theme values for the tokens defined in the dark
+     block above. Byte-identical to the hardcoded overrides these
+     replace (see CHANGELOG.md's 5.2.0 entry) — a mechanism change, not
+     a visual one, for both built-in themes; a plugin theme can now set
+     these same tokens itself instead of being stuck with the dark
+     defaults. */
+  --shadow-card:           0 1px 4px rgba(0, 0, 0, 0.08);
+  --shadow-card-selected:  0 0 0 2px rgba(var(--color-accent-rgb), 0.25), 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-context-menu:   0 4px 20px rgba(0, 0, 0, 0.15);
+  --shadow-toggle-active:  0 1px 3px rgba(0, 0, 0, 0.12);
+  --tint-hover:            rgba(var(--color-accent-rgb), 0.08);
+}
+
+/* ── Light theme: specific overrides ──
+   Only .card.selected's border-color remains here — a plain color
+   swap with no luminance/shadow tuning involved, unlike the 5 rules
+   above this used to also cover (see the --shadow-*/--tint-hover
+   tokens above and their light-block redefinitions just above this
+   comment) — those were the actual "hardcoded, plugin-themes-can't-
+   match-it" gap flagged during the 4.2.0 audit, now fixed. */
+:root[data-theme="light"] .card.selected {
+  border-color: var(--color-accent) !important;
+}
+
+/* ── Reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Direct request: remove the browser's default keyboard-focus outline
+   everywhere, no exceptions ("remove that if possible") — the yellow
+   ring that appeared on toolbar/tool buttons after a keypress. Kanvaz's
+   own selected/active states (`.selected`, `.scratch-tool-active`,
+   `.view-toggle-active`, etc.) already give visible feedback without it. */
+*:focus, *:focus-visible {
+  outline: none !important;
+}
+
+/* Direct request: no native OS chrome anywhere, including a number
+   input's native up/down spinner arrows — every numeric field in this
+   app is either typed into directly or drag-scrubbed (see properties.js's
+   makeScrubbable and cards.js's Transform fields), never incremented via
+   a native stepper control that looks nothing like the rest of the UI. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* ── Layout shell ── */
+#app {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#top-chrome {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+/* ── Side panel (v7.x redesign) ──
+   Replaces the old top board-tab strip + floating Settings popover.
+   #main-area is a row flex: [side-panel, canvas-container]. The icon
+   rail is always visible; only #side-panel-content toggles with S —
+   see docs/SIDE_PANEL_PLAN.md for the reasoning (permanent wayfinding
+   beats a shortcut you have to remember exists). */
+#main-area {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+#side-panel {
+  display: flex;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+#side-panel-rail {
+  width: 44px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+  gap: 4px;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+}
+
+.rail-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--color-text-3);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+
+.rail-btn:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text-2);
+}
+
+.rail-btn.active {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+}
+
+#side-panel-content {
+  width: 260px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border-2);
+  transition: width 0.15s ease;
+  font-size: 13px;
+  color: var(--color-text);
+  /* Perf: hints the compositor to promote this to its own layer for the
+     width transition instead of repainting from scratch each frame —
+     the other half of the "lil lag in side panel open/close" fix,
+     alongside the debounced settings write in sidepanel.js/ui.js. */
+  will-change: width;
+}
+
+/* Collapsed = zero width, not display:none — a CSS class (not the
+   `hidden` attribute) so the width transition above actually animates
+   instead of snapping instantly. */
+#side-panel-content.collapsed {
+  width: 0;
+  border-right: none;
+}
+
+.side-panel-section-header {
+  padding: 14px 16px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* ── Account corner menu ── */
+.account-menu {
+  position: fixed;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px var(--color-shadow);
+  padding: 4px;
+  z-index: 20001;
+  min-width: 160px;
+}
+
+.account-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--color-text-2);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.account-menu-item:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+/* Phase 2 — offline profile switching (docs/PROFILES_SYSTEM_PLAN.md) */
+.account-menu-profile-label {
+  padding: 6px 10px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-menu-sep {
+  height: 1px;
+  background: var(--color-border);
+  margin: 4px 6px;
+}
+
+/* ── Manage Profiles dialog (Phase 2) ── */
+.profiles-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 14, 16, 0.6);
+  z-index: 99997;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profiles-dialog-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: 12px;
+  padding: 20px;
+  width: 380px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 64px var(--color-shadow);
+}
+
+.profiles-dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 6px;
+}
+
+.profiles-dialog-note {
+  font-size: 11px;
+  color: var(--color-text-3);
+  line-height: 1.4;
+  margin-bottom: 14px;
+}
+
+.profiles-dialog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.profiles-dialog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--color-surface-2);
+}
+
+.profiles-dialog-row.active {
+  outline: 1px solid var(--color-accent);
+}
+
+.profiles-dialog-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.profiles-dialog-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-surface-3);
+  color: var(--color-text-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.profiles-dialog-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profiles-dialog-text-col {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.profiles-dialog-name {
+  font-size: 13px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profiles-dialog-desc {
+  font-size: 11px;
+  color: var(--color-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profiles-dialog-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+.profiles-dialog-edit-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.profiles-dialog-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.profiles-dialog-btn {
+  padding: 4px 8px;
+  background: none;
+  border: 1px solid var(--color-border-2);
+  border-radius: 5px;
+  color: var(--color-text-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.profiles-dialog-btn:hover {
+  background: var(--color-surface-3);
+  color: var(--color-text);
+}
+
+.profiles-dialog-btn.danger {
+  color: var(--color-danger, #e5484d);
+  border-color: var(--color-danger, #e5484d);
+}
+
+.profiles-dialog-btn.primary {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.profiles-dialog-create {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.profiles-dialog-input {
+  flex: 1;
+  padding: 7px 9px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  border-radius: 5px;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.profiles-dialog-close {
+  width: 100%;
+  padding: 8px;
+  background: none;
+  border: 1px solid var(--color-border-2);
+  border-radius: 6px;
+  color: var(--color-text-2);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.profiles-dialog-close:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+/* ── Auto-hide toolbar chrome-reveal ──
+   Class names kept as .moodlock-* internally — a leftover of when this
+   mechanic was shared with the now-removed Top Mode (v6.0.0, see
+   CHANGELOG); an implementation detail, not worth an unrelated rename
+   churning this file. Hides #top-chrome entirely; while active, a thin
+   invisible zone at the very top edge reveals #top-chrome as a floating
+   overlay on hover — it does NOT rejoin normal flex flow, so the canvas
+   never resizes/reflows under it; it slides in on top. */
+.moodlock-active #top-chrome {
+  display: flex !important;
+  position: fixed;
+  top: 0;
+  /* Direct feedback: "the reveal comes then the sidebar gets hide upper
+     two icons" — this used to span left:0, covering the always-visible
+     side panel rail's top icons the instant the chrome revealed, since
+     the rail sits at the exact same top-left corner once #top-chrome
+     leaves normal flow. Starting after the rail's own fixed width (see
+     #side-panel-rail) means the revealed chrome and the rail never
+     occupy the same pixels. */
+  left: 44px; right: 0;
+  z-index: 900;
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+  /* Direct feedback: "reveal should happen fast and it should fade
+     slow" — this transition used to be shared identically by both
+     directions (only reachable by adding/removing .moodlock-reveal),
+     so appearing and disappearing always took the same time. This rule
+     is the HIDDEN/hiding state, so its transition timing is what
+     governs fading OUT — kept deliberately slow and eased so the
+     chrome doesn't feel like it's snapping away mid-use. The reveal
+     (fast) timing lives on the .moodlock-reveal rule below, which wins
+     while revealing since that's the state being transitioned to. */
+  transition: transform 0.55s cubic-bezier(0.4,0,0.2,1), opacity 0.5s ease;
+}
+
+.moodlock-active.moodlock-reveal #top-chrome {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition: transform 0.12s cubic-bezier(0.16,1,0.3,1), opacity 0.1s ease;
+}
+
+#moodlock-hover-zone {
+  position: fixed;
+  top: 0;
+  /* Same left offset as #top-chrome above and for the same reason —
+     left:0 would let this strip's OS drag-region sit on top of the
+     side panel rail's first icon, both visually (the accent line
+     below painting across it) and functionally (a native app-region
+     drag can swallow a click that lands in the overlap instead of it
+     ever reaching the rail button underneath). */
+  left: 44px; right: 0;
+  height: 16px;
+  z-index: 899;
+  /* Real OS-level drag region — lets you move the window by grabbing
+     this strip even before the chrome reveals, since the titlebar
+     itself is hidden until hovered. Doesn't interfere with the
+     mouseenter/mouseleave hover-reveal listeners below; app-region
+     drag only affects mousedown-drag-to-move, not hover events. */
+  -webkit-app-region: drag;
+}
+
+/* Visible drag strip — a subtle accent line at the very top so users
+   can discover the grab zone. */
+#moodlock-hover-zone::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--color-accent);
+  opacity: 0.3;
+  transition: opacity 0.2s;
+}
+#moodlock-hover-zone:hover::before {
+  opacity: 0.6;
+}
+
+/* Subtle whole-viewport cue, independent of the badge (below) which can
+   go unnoticed in the corner of a screen recording or a busy monitor
+   setup — a thin accent inset so "you're in Top Mode" is visible no
+   matter where you're looking on screen.
+
+   Live-CDP-audit catch: originally `#app.top-mode-active`, but #app
+   sits behind #startup-screen (Home Screen, position:fixed, opaque,
+   z-index 99998) in paint order — confirmed via a real screenshot that
+   the border was completely invisible with the Home Screen open. A
+   ::after on body, fixed and z-indexed above every full-screen overlay
+   this app has, paints correctly regardless of which screen is
+   showing — body is an ancestor of #startup-screen too, unlike #app. */
+body.top-mode-active::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  z-index: 99999;
+  pointer-events: none;
+}
+
+/* ── Top Mode badge (reintroduced, v8.7.0) ──
+   Persistent, low-opacity, non-interactive — same "so you don't forget
+   it's on or how to get out" reasoning this had before its v6.0.0
+   removal. Bottom-left, clear of the side panel rail's own 44px, so it
+   never competes with #moodlock-hover-zone/#top-chrome's own reveal at
+   the top edge.
+
+   Live-CDP-audit catch: z-index 950 put this BEHIND #startup-screen
+   (the Home Screen, z-index 99998, position:fixed, opaque) — verified
+   with a real screenshot that toggling Top Mode from the Home Screen
+   showed the toast but neither the badge nor #app's accent border, so
+   the only visible sign Top Mode was active vanished the moment you
+   weren't looking at an open board. Raised above every full-screen
+   overlay this app has except toasts/dialogs (which should always win
+   regardless) — 99999 ties those two by value, but they occupy
+   different screen regions (top-left FPS overlay, bottom-center
+   toasts) so there's no actual visual collision with this badge's
+   bottom-left corner.
+
+   Second live-CDP-audit catch, same session: raising z-index above
+   #startup-screen (above) exposed a NEW collision that never showed
+   before — the Home Screen's own sidebar has a "Kanvaz vX.Y.Z" footer
+   label at its bottom-left, in the same corner this badge occupies,
+   confirmed by screenshot. `bottom: 36px` clears a single line of that
+   footer text on every screen this badge can appear on; board/Map view
+   have nothing in that corner to begin with, so raising it costs
+   nothing there. */
+#top-mode-badge {
+  position: fixed;
+  bottom: 36px;
+  left: 54px;
+  z-index: 99999;
+  background: var(--color-accent);
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  opacity: 0.55;
+  pointer-events: none;
+  box-shadow: 0 2px 8px var(--color-shadow);
+}
+
+/* ── Presentation Mode ──
+   Hard-hidden, not the auto-hide-on-idle/reveal-on-hover treatment Top
+   Mode's chrome uses (#moodlock-* classes) — a presenter's mouse WILL
+   pass near the top of the window, and the toolbar popping back in
+   mid-presentation would be worse than Top Mode's own hover-reveal
+   convenience is useful there. #titlebar is deliberately left alone —
+   window minimize/maximize/close should still work while presenting. */
+body.presentation-mode-active #toolbar,
+body.presentation-mode-active #side-panel {
+  display: none !important;
+}
+
+#presentation-mode-badge {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99999;
+  background: var(--color-surface);
+  color: var(--color-text-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-2);
+  pointer-events: none;
+  box-shadow: 0 2px 10px var(--color-shadow);
+}
+
+@keyframes search-bar-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ── Titlebar ── */
+#titlebar {
+  display: flex;
+  align-items: center;
+  height: var(--titlebar-h);
+  background: var(--color-chrome);
+  border-bottom: 1px solid var(--color-border);
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+/* macOS: the native traffic lights sit at the left of the titlebar, so the
+   Windows-style buttons go and the logo moves clear of the lights. */
+.platform-mac #btn-minimize,
+.platform-mac #btn-maximize,
+.platform-mac #btn-close {
+  display: none;
+}
+
+.platform-mac #titlebar-logo {
+  padding-left: 84px;
+}
+
+/* Home Screen — same mac-only clearance for the native traffic lights,
+   found auditing for mac-friendliness (see the matching comment on
+   #startup-logo-row's creation in boards.js for the why). */
+.platform-mac #startup-logo-row {
+  padding-left: 84px;
+}
+
+/* The Home Screen's own minimize/maximize/close buttons (boards.js) —
+   mac already has real, native traffic lights for this (inset top-left
+   into the window itself), so these Windows-style buttons would just
+   be redundant, wrong-side, non-native duplicates. Same exclusion the
+   real titlebar's own buttons already get above. */
+.platform-mac #home-btn-minimize,
+.platform-mac #home-btn-maximize,
+.platform-mac #home-btn-close {
+  display: none;
+}
+
+#titlebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  /* Direct feedback: "make kanvaz icon in this corner the button to
+     go home to canvaz and canvaz to home" — the logo itself is the
+     Home Screen toggle now, not a separate toolbar button. */
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+
+#titlebar-logo:hover {
+  opacity: 0.8;
+}
+
+#titlebar-logo .logo-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  /* Direct feedback: "logo... lok liek block in icon where ever
+     possible make it circle" — the source PNG is a circular badge
+     design on a square canvas; a small 4px corner-round left the
+     canvas's own square edges visible around it instead of cropping
+     to the actual circle the artwork already is. */
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+#titlebar-logo .logo-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: 0.02em;
+}
+
+.titlebar-dirty-dot {
+  color: var(--color-amber);
+}
+
+#titlebar-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  -webkit-app-region: drag;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#titlebar-controls {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: var(--titlebar-h);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-2);
+  font-size: 14px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.titlebar-btn:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.titlebar-btn.close:hover {
+  background: var(--color-red);
+  color: #fff;
+}
+
+/* ── Toolbar ── */
+#toolbar {
+  display: flex;
+  align-items: center;
+  height: var(--toolbar-h);
+  background: var(--color-chrome);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  padding: 0 10px;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  flex-shrink: 0;
+  z-index: 90;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.toolbar-btn:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.toolbar-btn:active {
+  transform: scale(0.96);
+  background: var(--color-surface-2);
+}
+
+/* ── Account/profile avatar (titlebar) ──
+   Direct feedback: the corner icon here was a plain three-dot glyph
+   (deliberately "not a literal avatar" per the v7.x redesign comment
+   above it, back when the profile system didn't exist yet) while the
+   Home Screen's own equivalent button is already a real colored-circle
+   avatar with the profile's initial or photo. Same visual language
+   here now, matching how Figma/Notion/Linear all put a colored circle
+   top-right — a real, working profile switcher deserves to look like
+   one, not a generic overflow menu. Sizing/colors match the Home
+   Screen avatar's own treatment exactly (boards.js), just constrained
+   to the titlebar's own row height. */
+#btn-account {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 1.5px solid transparent;
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  justify-content: center;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+#btn-account img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}
+
+#btn-account:hover {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: transparent;
+  transform: scale(1.06);
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+}
+
+#btn-account:active {
+  transform: scale(0.96);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.toolbar-btn.active {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  border-color: rgba(var(--color-accent-rgb), 0.3);
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--color-border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+/* ── Board / Map segmented toggle ── */
+.view-toggle-wrap {
+  display: flex;
+  align-items: center;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  padding: 2px;
+  gap: 1px;
+  margin: 0 4px;
+}
+
+.view-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  color: var(--color-text-3);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.view-toggle-btn:hover {
+  color: var(--color-text);
+}
+
+.view-toggle-btn.view-toggle-active {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-toggle-active);
+}
+
+/* ── Map View nodes ── */
+.map-node {
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.map-node-entrance {
+  animation: map-node-in 0.42s cubic-bezier(0.22,0.61,0.36,1) both;
+}
+
+@keyframes map-node-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0)     scale(1); }
+}
+
+.map-node:hover {
+  border-color: var(--color-border-2) !important;
+  box-shadow: 0 4px 18px var(--color-shadow) !important;
+}
+
+/* Multi-select (4.7.0) — outline instead of border-color/box-shadow so
+   this never fights with :hover's !important rules above, or with the
+   single-select border/glow selectNode() sets inline; a node can be
+   both the "primary" single-selection AND part of a multi-selection
+   at once, and both indicators should be visible together. */
+.map-node-multiselected {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Node notes (direct request) — "like a comment reply", only visible
+   once a note actually exists; the toggle badge is the always-present
+   entry point (dimmed until hover so it doesn't clutter an empty node). */
+.map-node-note-toggle {
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  transform: translateX(-50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  z-index: 3;
+  color: var(--color-text-3);
+  /* Bug fix, direct feedback: this used to default to opacity:0 (fully
+     invisible until hover) — "lighten the almost invisible color too...
+     giving default professional settings is our lookout." A discoverable
+     affordance has to be visible at rest, even dimly, or a first-time
+     user has no way to know it exists at all. Now a real, dim-but-real
+     0.45 at rest, brightening to 1 on hover — same "quiet until you
+     look for it, never literally gone" treatment used elsewhere in this
+     app (e.g. the Layers panel's star/pin icons). */
+  opacity: 0.45;
+  transition: opacity 0.12s;
+}
+
+.map-node-note {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  width: 100%;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-family: var(--font-ui);
+  line-height: 1.4;
+  color: var(--color-text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  max-height: 72px;
+  overflow: auto;
+  z-index: 4;
+  display: none;
+}
+
+/* Custom checkbox (Task Tracker) — direct request: no native/white OS
+   chrome anywhere. Plain `accent-color` still lets the browser draw its
+   own native box/border underneath (visibly white/light against this
+   app's dark theme); `appearance:none` replaces it entirely with a
+   themed box + a hand-drawn checkmark, same flat line-icon language as
+   every other custom control in this app. */
+.kanvaz-checkbox {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  border: 1.5px solid var(--color-border-2);
+  border-radius: 4px;
+  background: var(--color-surface-2);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.kanvaz-checkbox:hover {
+  border-color: var(--color-accent);
+}
+
+.kanvaz-checkbox:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.kanvaz-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.kanvaz-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* A gated parent task (subtasks exist, done is derived) shows a small
+   neutral dash instead of a checkmark while NOT done, so it visibly
+   reads as "automatic" rather than "you could check this yourself" —
+   distinct from a plain unchecked box. */
+.kanvaz-checkbox.kanvaz-checkbox-gated:not(:checked)::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 6.5px;
+  width: 8px;
+  height: 2px;
+  background: var(--color-text-3);
+  border-radius: 1px;
+}
+
+/* Wraps the editing textarea + Done button — takes over the same
+   position/size .map-node-note itself uses at rest, since the textarea
+   is no longer a direct, self-positioned child of the node while
+   actively editing (see map-view.js's startEditNote). */
+.map-node-note-edit-wrap {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  width: 100%;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.map-node-note-editing {
+  display: block !important;
+  position: static;
+  width: 100%;
+  height: 60px;
+  resize: none;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-accent);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-family: var(--font-ui);
+  line-height: 1.4;
+  color: var(--color-text);
+  outline: none;
+}
+
+.map-node-note-done {
+  align-self: flex-end;
+  padding: 4px 10px;
+  background: var(--color-accent);
+  border: none;
+  border-radius: 5px;
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+
+.map-node-note-done:hover {
+  opacity: 0.85;
+}
+
+/* Alignment guides (5.2.0) — children of #canvas-world, so they inherit
+   its pan/zoom transform and land in the same world-space coordinates
+   as the cards they align against. Deliberately huge fixed length
+   rather than measuring board extents — simpler, and a drag never
+   needs the guide to reach further than a couple of screens either way. */
+.align-guide {
+  position: absolute;
+  display: none;
+  background: var(--color-accent);
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 500;
+}
+
+.align-guide-v {
+  top: -10000px;
+  width: 1px;
+  height: 20000px;
+}
+
+.align-guide-h {
+  left: -10000px;
+  width: 20000px;
+  height: 1px;
+}
+
+.map-port {
+  transition: background 0.14s ease, transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.map-port:hover {
+  box-shadow: 0 0 0 4px var(--color-accent-bg);
+}
+
+/* ── Card hover lift ── */
+.card {
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+/* ── Context menu polish ── */
+#context-menu {
+  animation: ctx-fade-in 0.12s ease-out;
+}
+
+@keyframes ctx-fade-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.ctx-item.danger {
+  color: var(--color-red) !important;
+}
+
+/* ── Canvas area ── */
+#canvas-container {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background: var(--color-canvas);
+  cursor: default;
+}
+
+#canvas-container.grabbing {
+  cursor: grabbing;
+}
+
+#canvas-container.grab {
+  cursor: grab;
+}
+
+/* Marquee (rubber-band) multi-select — V toggles this mode, or hold
+   Ctrl for a one-off drag without leaving default mode. Crosshair
+   signals "draw a box" the same way most other canvas/design tools do. */
+#canvas-container.marquee-mode {
+  cursor: crosshair;
+}
+
+#marquee-select-box {
+  position: fixed;
+  display: none;
+  box-sizing: border-box;
+  border: 1px solid var(--color-accent);
+  /* The translucent fill's exact color is set inline in canvas.js
+     (startMarquee) instead of here — --color-accent can't be given
+     partial alpha in plain CSS (it isn't stored as separate R/G/B
+     components) without color-mix(), which isn't available on this
+     app's Electron/Chromium baseline (shipped Chrome 111, this app
+     targets 108) — same class of gap as Promise.withResolvers/
+     createImageBitmap found elsewhere in this codebase. Computing the
+     rgba() in JS from the theme's actual current accent color avoids
+     hardcoding a color that would mismatch a plugin theme. */
+  pointer-events: none;
+  z-index: 15000;
+}
+
+#canvas-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* Grid overlay */
+#canvas-grid {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Scratch Board (9.5.0) — background layer: same box as #canvas-grid,
+   shown instead of it only while Scratch view is active (see
+   scratch-board.js's setActive()). */
+#scratch-bg-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  display: none;
+}
+
+/* Scratch Board — stroke layer: sits above every card (a comfortably-high
+   fixed z-index, not tied to any card's own z-order, which only matters
+   for stacking cards against each other) regardless of board size.
+   pointer-events stays none (cards stay clickable) until a drawing tool
+   is armed, same show/hide-input pattern annotate.js's per-card overlay
+   already uses. */
+#scratch-strokes-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 100000;
+  display: none;
+}
+
+/* Scratch Board drawing toolbar — same visual language as .view-toggle-wrap
+   (segmented pill, same surface/border tokens) so it reads as part of the
+   same toolbar family rather than a bolted-on control. Hidden by default;
+   scratch-board.js toggles "visible" only while Scratch view is active. */
+.scratch-toolbar {
+  display: none;
+  align-items: center;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  padding: 4px 5px;
+  gap: 3px;
+  margin: 0 4px;
+}
+
+.scratch-toolbar.visible {
+  display: flex;
+}
+
+.scratch-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Bumped from 24px to match the side-panel rail's own 30px buttons
+     (.rail-btn) — direct feedback that the Scratch toolbar read too small
+     for full-screen use. Icon SVGs themselves are bumped in index.html
+     too (14 -> 18) so they scale with the bigger hit area, not just sit
+     in more empty padding. */
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--color-text-3);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.scratch-tool-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface-3, rgba(255,255,255,0.06));
+}
+
+.scratch-tool-btn.scratch-tool-active {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+}
+
+.scratch-toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.scratch-color-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: none;
+  cursor: pointer;
+}
+
+.scratch-color-swatch-lg {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+/* Eraser cursor — a hollow circle, sized to the eraser's actual hit
+   radius (set live from scratch-board.js), following the pointer while
+   the eraser tool is armed. Plain DOM element rather than a CSS `cursor:`
+   image since it needs to resize as the width slider changes. */
+#scratch-eraser-cursor {
+  position: fixed;
+  border: 1.5px solid var(--color-accent);
+  border-radius: 50%;
+  background: rgba(124, 92, 252, 0.08);
+  pointer-events: none;
+  z-index: 500;
+  transform: translate(-50%, -50%);
+}
+
+#scratch-eraser-cursor[hidden] {
+  display: none;
+}
+
+.scratch-num-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--color-text-3);
+  font-family: var(--font-ui);
+  padding: 0 3px;
+}
+
+.scratch-num-input {
+  width: 32px;
+  height: 20px;
+  padding: 0 2px;
+  font-size: 11px;
+  font-family: var(--font-ui);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  text-align: center;
+}
+
+/* Empty state
+   Polish fix: this was the flattest, least-designed screen in the app —
+   static, no motion, icon at 0.18 opacity (practically invisible), and
+   it's the very next thing shown after the animated First-run screen
+   closes on a brand-new board. Brought up to the same standard as
+   .card-error-state (accent-tinted, properly visible) instead of
+   reading like a placeholder. */
+#canvas-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+  z-index: 1;
+  animation: canvas-empty-in 0.5s cubic-bezier(0.16,1,0.3,1);
+}
+
+@keyframes canvas-empty-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.94); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+#canvas-empty.hidden {
+  display: none;
+}
+
+#canvas-empty .empty-icon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.45;
+  color: var(--color-accent);
+}
+
+#canvas-empty .empty-title {
+  font-size: 15px;
+  color: var(--color-text-3);
+  font-weight: 500;
+}
+
+#canvas-empty .empty-sub {
+  font-size: 12px;
+  color: var(--color-text-3);
+  opacity: 0.6;
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* Drop overlay */
+#drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(var(--color-accent-rgb), 0.06);
+  border: 2px dashed var(--color-accent);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+#drop-overlay.visible {
+  opacity: 1;
+}
+
+#drop-overlay .drop-label {
+  font-size: 16px;
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+/* ── Status bar ── */
+#statusbar {
+  display: flex;
+  align-items: center;
+  height: var(--statusbar-h);
+  background: var(--color-chrome);
+  border-top: 1px solid var(--color-border);
+  padding: 0 12px;
+  gap: 16px;
+  flex-shrink: 0;
+  z-index: 90;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-3);
+  white-space: nowrap;
+}
+
+.status-item .status-label {
+  color: var(--color-text-3);
+  opacity: 0.6;
+}
+
+.status-item .status-value {
+  color: var(--color-text-2);
+}
+
+.status-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--color-border);
+}
+
+.status-spacer {
+  flex: 1;
+}
+
+#status-save {
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+#status-save.saved {
+  color: var(--color-green);
+}
+
+#status-save.unsaved {
+  color: var(--color-amber);
+}
+
+/* ── Cards ── */
+.card {
+  position: absolute;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+  will-change: transform;
+  min-width: 80px;
+  min-height: 80px;
+  container-type: inline-size;
+  container-name: card;
+  animation: card-in 0.2s ease-out;
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out;
+}
+
+/* Redesign v1 Phase 3 (card visual polish) — a gentle lift on hover,
+   on top of the existing hover outline below. Card visuals were
+   flagged directly as "outdated" versus the design reference (always-
+   visible name/metadata footer, a real elevation change, bigger
+   radius) — this is the hover half of that; translateY needs the
+   transition declared above on .card itself since this rule only sets
+   the end state. */
+.card:hover {
+  transform: translateY(-2px);
+}
+
+/* Entrance animation — plays once when a card's DOM element is first
+   created (new card, paste, drop, or board load). Purely cosmetic,
+   never re-triggers on later mutations since the element itself isn't
+   recreated for resize/flip/etc. */
+@keyframes card-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.card.selected {
+  outline: 1.5px solid var(--color-accent);
+  outline-offset: 0px;
+  box-shadow: var(--shadow-card-selected);
+}
+
+/* Isolate View (Shift+I) — cards.js's toggleIsolate() adds this to every
+   card NOT in the selection at the moment isolate was turned on. Plain
+   display:none rather than opacity/pointer-events: an isolated card
+   should behave as if it doesn't exist (no accidental clicks through a
+   dimmed card, no layout space reserved for it), same as Maya's own
+   Isolate Select. */
+.card.card-isolated-hidden {
+  display: none;
+}
+
+/* Layers panel eye-icon toggle (cards.js's toggleCardVisibility) — a
+   real persisted `hidden` property, distinct from the isolate class
+   above so the two mechanisms never fight over the same class name. */
+.card.card-layer-hidden {
+  display: none;
+}
+
+.card:hover:not(.selected) {
+  outline: 1px solid var(--color-border-2);
+  outline-offset: 0px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6);
+}
+
+.card.pinned {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5), 0 0 0 1.5px var(--color-amber);
+}
+
+/* When a card is both selected and pinned, the selection ring takes
+   visual priority — the pin dot alone signals "pinned" so the two
+   colored rings don't compete. Bug-bounty fix (v5.3.0): this used to
+   repeat --shadow-card-selected's dark-theme value as a hardcoded
+   literal instead of the variable itself — harmless before the light-
+   theme override carried `!important` (which beat this rule's higher
+   3-class specificity regardless of value), but the theme-variable
+   cleanup that removed that `!important` left this rule permanently
+   winning over .card.selected's now-un-important box-shadow, so a
+   pinned+selected card in light theme silently kept the dark-tuned
+   shadow. Using the same variable both rules already agree on removes
+   the specificity race entirely — there's nothing left to win. */
+.card.selected.pinned {
+  box-shadow: var(--shadow-card-selected);
+}
+
+/* Card bottom bar — redesign v1 Phase 3 (card visual polish, per the
+   design reference screenshot): ALWAYS visible now, not a hover-reveal
+   glass overlay. A card's name and at-a-glance metadata (resolution,
+   duration, char count — whatever applies to its type) are information
+   worth seeing on the board itself, the same way a file manager's list
+   view doesn't hide filenames until you point at them. Two text lines
+   (title + meta) plus one consistent type pill on the right, instead of
+   the old single row of small per-type-colored badges crammed in next
+   to a monospace filename. */
+.card-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  min-height: 52px;
+  background: var(--color-surface-2);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.card-bar-info {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.card-bar-title-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 3px;
+}
+
+.card-bar-title {
+  font-family: var(--font-ui);
+  font-size: clamp(11px, 3cqw, 14px);
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.card-bar-meta {
+  font-family: var(--font-ui);
+  font-size: clamp(9px, 2.2cqw, 11px);
+  color: var(--color-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+  margin-top: 1px;
+}
+
+/* One consistent pill for every card type — the old per-type colors
+   (amber for video, red for audio, etc.) read as a status/warning
+   language that was never intended; the design reference uses the same
+   accent treatment for every type, distinguished by its label text
+   alone. */
+.card-type-pill {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
+/* v6.4.0 — shared-across-boards indicator. Now sits inline before the
+   title instead of as a separate badge in the old single-row layout. */
+.card-bar-shared-icon {
+  flex-shrink: 0;
+  color: var(--color-accent);
+  font-size: 11px;
+}
+
+.card-bar-color-swatch {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-border-2);
+}
+
+/* Rename input — same title styling/position as the label it replaces
+   so swapping between them doesn't visibly jump the footer layout. */
+.card-bar-title-input {
+  font-family: var(--font-ui);
+  font-size: clamp(11px, 3cqw, 14px);
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  padding: 0 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Custom tooltip (tooltip.js) — replaces the OS-native title-attribute
+   box everywhere in the app at once. Positioned via JS (left/top set
+   directly, see positionTooltip()); this block only owns the visual
+   styling and the show/hide fade. */
+#custom-tooltip {
+  position: fixed;
+  z-index: 100000;
+  max-width: 260px;
+  padding: 5px 9px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.4;
+  box-shadow: 0 4px 16px var(--color-shadow);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+#custom-tooltip.tooltip-above {
+  transform: translateY(-2px);
+}
+
+#custom-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Relink button — only present while a card's media failed to load */
+.card-relink-btn {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border: none;
+  border-radius: 3px;
+  padding: 2px 7px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.card-relink-btn:hover {
+  background: rgba(var(--color-accent-rgb), 0.28);
+}
+
+/* ── Loading skeleton (image/GIF/video) ── */
+.card-skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, var(--color-surface) 30%, var(--color-surface-3) 50%, var(--color-surface) 70%);
+  background-size: 300% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.card-skeleton-out {
+  opacity: 0;
+}
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: 120% 0; }
+  100% { background-position: -20% 0; }
+}
+
+/* ── Loading spinner (video, shown on top of the skeleton until the
+   first frame renders) ── */
+.card-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: card-spinner-spin 0.8s linear infinite;
+  z-index: 2;
+  pointer-events: none;
+}
+
+@keyframes card-spinner-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Themed media error state (replaces the old plain-text fallback) ── */
+.card-error-state {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--color-surface);
+  color: var(--color-text-3);
+  padding: 12px;
+  text-align: center;
+}
+
+.card-error-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--color-text-3);
+  opacity: 0.7;
+}
+
+.card-error-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.card-error-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  max-width: 100%;
+}
+
+.card-error-reason {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--color-text-3);
+  max-width: 90%;
+  text-align: center;
+  margin-top: 2px;
+}
+
+/* Persistent annotation indicator — stays visible even without hover,
+   unlike the card bar, so it's obvious at a glance which cards have
+   markup on them. Sits opposite the pin dot (top-left vs top-right). */
+.card-annotation-dot {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-accent);
+  border: 1.5px solid var(--color-border-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.card-annotation-dot svg {
+  width: 8px;
+  height: 8px;
+}
+
+/* ── GIF pause/resume ── */
+.gif-toggle-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 4;
+}
+
+.gif-toggle-btn svg {
+  width: 9px;
+  height: 9px;
+}
+
+.card:hover .gif-toggle-btn {
+  opacity: 1;
+}
+
+.gif-pause-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.gif-pause-overlay.visible {
+  opacity: 1;
+}
+
+.gif-pause-overlay svg {
+  width: 20px;
+  height: 20px;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 50%;
+  color: #fff;
+}
+
+/* Card resize handles */
+/* 12px, up from 8px (audit fix — hard to grab precisely, especially on
+   corners). Kept centered at the same point relative to the card edge
+   as before (see buildResizeHandles()'s matching offset update in
+   cards.js) so this is purely bigger/easier to hit, not repositioned. */
+.resize-handle {
+  position: absolute;
+  /* Bug bounty fix: "make unique and better and bigger handles for
+     resize and make em like they will get big or small when card
+     itself gets resized accordingly" — was a flat 12px regardless of
+     card size (tiny, easy-to-miss target on a large card). Same
+     clamp()-driven container-query scaling already used for every
+     other size-sensitive element on a card (tag chips, scrub bar, …). */
+  width: clamp(10px, 3.2cqw, 20px);
+  height: clamp(10px, 3.2cqw, 20px);
+  background: var(--color-accent);
+  border-radius: 50%;
+  border: clamp(1.5px, 0.4cqw, 2.5px) solid var(--color-bg);
+  box-shadow: 0 0 0 1px rgba(var(--color-accent-rgb), 0.4);
+  opacity: 0;
+  z-index: 10;
+  cursor: nwse-resize;
+  transition: opacity 0.12s, transform 0.12s;
+}
+
+.card.selected .resize-handle,
+.card:hover .resize-handle,
+.card.resizing .resize-handle {
+  opacity: 1;
+}
+
+.card.selected .resize-handle:hover,
+.card:hover .resize-handle:hover {
+  transform: scale(1.4);
+}
+
+/* The specific handle being dragged (not just hovered) grows further
+   still, for the duration of the drag — clear feedback on which one is
+   live, independent of where the pointer has since moved to. */
+.resize-handle.active {
+  transform: scale(1.6);
+}
+
+/* Pin indicator */
+.card-pin {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-amber);
+  border: 1.5px solid var(--color-border);
+  box-shadow: 0 0 8px rgba(240, 165, 0, 0.7);
+  display: none;
+  z-index: 5;
+}
+
+.card.pinned .card-pin {
+  display: block;
+}
+
+/* ── Note card ── */
+.card-note {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+/* Top-left accent bar — gives notes a visual anchor distinct from the
+   flat surface of every other card type at a glance. */
+.note-accent-bar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 3px;
+  height: 24px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* ── URL reference card ── */
+.card-url {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.url-accent-bar {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  width: 18px;
+  height: 18px;
+  color: var(--color-accent);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.url-accent-bar svg {
+  width: 100%;
+  height: 100%;
+}
+
+.file-type-icon {
+  overflow: visible;
+}
+
+.file-type-tag {
+  position: absolute;
+  left: 50%;
+  bottom: -2px;
+  transform: translateX(-50%) scale(0.62);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-bg);
+  background: var(--color-accent);
+  padding: 0 3px;
+  border-radius: 2px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.url-body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 0 36px;
+  margin-top: 4px;
+}
+
+.url-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 0;
+  caret-color: var(--color-accent);
+}
+
+.url-input::placeholder {
+  color: var(--color-text-2);
+}
+
+.url-label {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.card-file {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.url-open-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* v7.x — real in-card preview for a file-ref card pointing at a .pdf
+   OR an image. .has-file-preview overrides .card-file's default
+   "center a compact icon+label" layout so the preview actually fills
+   the resizable card, with the label/Open/Change row pinned at the
+   bottom instead of vertically centered — every other file-ref card
+   is untouched. */
+.card-file.has-file-preview {
+  justify-content: flex-start;
+  padding-top: 26px;
+}
+
+.card-file.has-file-preview .url-body {
+  margin-top: 4px;
+  padding: 0 10px 6px;
+  flex-shrink: 0;
+}
+
+/* Found by a real hit test (2026-09-22): on a file card with a preview the
+   label row (name + Change file + Open) sat underneath the card's own name
+   bar, so BOTH buttons were covered and could not be clicked, on PDF, image
+   and text cards too. The name is already in the bar, so the label is hidden
+   and the two buttons become a small control in the preview's top-right
+   corner, shown on hover or when the card is selected. */
+.card-file.has-file-preview .url-body {
+  position: absolute;
+  top: 30px;
+  right: 8px;
+  left: auto;
+  margin: 0;
+  padding: 3px 4px;
+  z-index: 5;
+  display: flex;
+  gap: 2px;
+  background: var(--color-chrome);
+  border-radius: 8px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.card-file.has-file-preview:hover .url-body,
+.card-file.has-file-preview.selected .url-body {
+  opacity: 1;
+}
+
+.card-file.has-file-preview .url-body .url-label {
+  display: none;
+}
+
+.pdf-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Image file-ref preview — simpler than PDF's (no page/zoom state, no
+   scroll area), just the actual picture filling the card with
+   letterboxing rather than cropping. .pdf-status is reused verbatim
+   for the loading/error text (identical treatment, no reason for a
+   second copy of the same four rules). */
+.file-image-preview {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: var(--color-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.file-image-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* One-line caption on an Adobe preview: the source size and anything the
+   user should know (thumbnail only, CMYK approximate). Sits inside the
+   preview, never over the name/meta row. */
+.file-preview-note {
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  max-width: calc(100% - 96px);
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--color-text-2);
+  background: var(--color-chrome);
+  opacity: 0.92;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A reason (for example Fresco's export advice) is a sentence, not one word. */
+.pdf-status.file-preview-reason {
+  width: 84%;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.45;
+}
+
+/* Text file-ref preview — rendered file contents in a scrollable,
+   selectable monospace pane. Content is set via textContent, so it is
+   always displayed literally. */
+.file-text-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.file-text-pre {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 4;
+  color: var(--color-text);
+  user-select: text;
+  cursor: text;
+}
+
+.file-text-note {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  font-size: 10px;
+  color: var(--color-text-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.pdf-scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--color-bg);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  position: relative;
+}
+
+.pdf-scroll-area canvas {
+  display: block;
+  box-shadow: 0 2px 12px var(--color-shadow);
+  margin: 10px;
+}
+
+.pdf-status {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 11px;
+  color: var(--color-text-3);
+  text-align: center;
+  padding: 0 10px;
+  max-width: 90%;
+}
+
+.pdf-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--color-chrome);
+  border-top: 1px solid var(--color-border);
+}
+
+.pdf-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+
+.pdf-toolbar-btn:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+.pdf-toolbar-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pdf-toolbar-btn:disabled:hover {
+  background: none;
+  color: var(--color-text-2);
+}
+
+.pdf-toolbar-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.pdf-page-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-3);
+  min-width: 40px;
+  text-align: center;
+}
+
+.url-open-btn:hover {
+  color: var(--color-accent);
+}
+
+.url-open-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.url-open-btn.loading {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.card-url.has-preview {
+  justify-content: flex-start;
+  padding-top: 14px;
+}
+
+.url-preview {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 14px 12px 14px;
+  overflow: hidden;
+}
+
+.url-preview-thumb {
+  width: 100%;
+  max-height: 120px;
+  object-fit: cover;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border);
+}
+
+.url-preview-title {
+  font-size: clamp(10px, 3cqw, 13px);
+  color: var(--color-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ── Color swatch card ── */
+.color-swatch {
+  position: relative;
+  width: 100%;
+  height: calc(100% - 72px);
+  cursor: pointer;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.color-label-row {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+/* Palette strip (5.2.0) — one row of saved swatches + an "add current
+   color" button, so a color card can hold a small palette instead of
+   just one color. Fixed height, budgeted into .color-swatch's own
+   height above the same way .color-label-row's 24px already is. */
+.color-palette-strip {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  overflow-x: auto;
+}
+
+.color-palette-chip {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid var(--color-border-2);
+  cursor: pointer;
+}
+
+.color-palette-add {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px dashed var(--color-border-2);
+  background: none;
+  color: var(--color-text-3);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.color-palette-add:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.color-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-2);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  user-select: all;
+  cursor: pointer;
+}
+
+.color-copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.color-copy-btn:hover {
+  color: var(--color-accent);
+}
+
+.color-copy-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Contrast checker — subtle white/black "Aa" samples, bottom-right */
+.color-contrast {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  /* pointer-events on so the chips' tooltips (the ratio and its WCAG grade)
+     can show; nothing here is clickable. */
+}
+
+.color-contrast > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: default;
+}
+
+.color-contrast .contrast-aa {
+  font-size: 11px;
+}
+
+.color-contrast .contrast-num {
+  font-size: 9px;
+  font-weight: 500;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.color-contrast .contrast-white {
+  color: #fff;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.color-contrast .contrast-black {
+  color: #000;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Below 3:1 the sample is not something you should put text in. */
+.color-contrast .contrast-fail {
+  opacity: 0.45;
+}
+
+.card-note .note-body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 12px;
+  caret-color: var(--color-accent);
+}
+
+.card-note .note-body::placeholder {
+  color: var(--color-text-2);
+}
+
+/* Markdown preview toggle (5.2.0) — same corner/sizing convention as
+   .url-open-btn, just positioned top-right since a note has no existing
+   button row to join. */
+.note-preview-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.note-preview-toggle:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-2);
+}
+
+.note-preview-toggle.active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+.note-preview {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 12px;
+  padding-top: 32px;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.note-preview p {
+  margin: 0 0 8px 0;
+}
+
+.note-preview h3, .note-preview h4, .note-preview h5 {
+  margin: 0 0 6px 0;
+  color: var(--color-text);
+}
+
+.note-preview ul {
+  margin: 0 0 8px 18px;
+  padding: 0;
+}
+
+.note-preview code {
+  background: var(--color-surface-2);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.note-preview a {
+  color: var(--color-accent);
+}
+
+/* ── Bare text label ──
+   Deliberately no background/border/shadow at rest OR on hover, unlike
+   every other card type — this is a floating label for titling a
+   section of the board directly, not a boxed textarea. Selection still
+   shows the normal outline (from the shared .card.selected rule) so
+   there's some feedback it's selected, but its own box-shadow glow is
+   suppressed here to keep the "no chrome" look even when selected. */
+.card-text {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  transition: border-color 0.12s ease-out;
+}
+
+.card-text:hover {
+  box-shadow: none;
+  /* A quiet dashed hint on hover only — signals "this is editable" for
+     what otherwise renders as plain floating text at rest, without
+     giving the label a permanent box the way every other card type
+     has. Same dashed weight/color already used for drop-zone hints
+     elsewhere in this file. */
+  border: 1px dashed var(--color-border-2);
+}
+
+.card-text.selected {
+  box-shadow: none;
+}
+
+.card-text .text-body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  text-align: center;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 4px;
+  caret-color: var(--color-accent);
+}
+
+.card-text .text-body::placeholder {
+  color: var(--color-text-3);
+}
+
+/* Text card mini toolbar (font-size stepper + color swatch), shown only
+   while actively editing this card's text — see buildTextCard's comment
+   for why this exists alongside the same controls in Properties. */
+.text-mini-toolbar {
+  display: none;
+  position: absolute;
+  top: -38px;
+  left: 0;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  padding: 4px 5px;
+  box-shadow: 0 4px 16px var(--color-shadow);
+  z-index: 20;
+}
+
+.text-mini-toolbar.visible {
+  display: flex;
+}
+
+.text-mini-toolbar button {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.text-mini-toolbar button:hover {
+  background: var(--color-surface-3, rgba(255,255,255,0.06));
+  color: var(--color-text);
+}
+
+.text-mini-toolbar input[type="color"] {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+/* ── Video card ── */
+.card-video > video {
+  display: block;
+  width: 100%;
+  height: calc(100% - 52px - clamp(28px, 10cqw, 48px));
+  object-fit: cover;
+}
+
+.video-scrub {
+  position: absolute;
+  bottom: 52px;
+  left: 0;
+  right: 0;
+  height: clamp(28px, 10cqw, 48px);
+  display: flex;
+  align-items: center;
+  padding: 0 clamp(6px, 2.5cqw, 14px);
+  gap: clamp(4px, 2cqw, 10px);
+  /* Usability audit: was a flat var(--color-chrome) — in light theme
+     that's a near-white bar clamped over live video frames, which
+     often reads as a rendering glitch rather than a control surface.
+     A dark translucent scrim + blur (the same treatment every video
+     player's control bar uses, regardless of the host page's own
+     theme) reads correctly against any footage and matches the tag
+     bar treatment right above it. */
+  background: rgba(10, 10, 16, 0.6);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  /* The scrim is a fixed dark glass regardless of app theme (see above),
+     so its icons/text need a fixed light color too — inherited by the
+     play/mute buttons below, which have no color rule of their own.
+     Without this, light theme's normal dark icon/text color (meant for
+     the old light var(--color-chrome) bar) goes near-invisible here. */
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 3;
+}
+
+.video-scrub .media-play-btn svg,
+.audio-scrub .media-play-btn svg {
+  width: clamp(14px, 6cqw, 32px);
+  height: clamp(14px, 6cqw, 32px);
+}
+
+.video-scrub .media-mute-btn svg,
+.audio-scrub .media-mute-btn svg {
+  width: clamp(14px, 5cqw, 24px);
+  height: clamp(14px, 5cqw, 24px);
+}
+
+.video-scrub .media-mute-btn,
+.audio-scrub .media-mute-btn,
+.audio-scrub .media-loop-btn {
+  min-width: clamp(20px, 6cqw, 32px);
+  min-height: clamp(20px, 6cqw, 32px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.audio-scrub .media-loop-btn svg {
+  /* Bug bounty fix: "the refresh button... [is] so small" — the loop
+     icon was noticeably smaller than the play/mute icons right next to
+     it in the same row, not a deliberate hierarchy, just an oversight.
+     Matches the mute icon's own scale now. */
+  width: clamp(15px, 5.5cqw, 24px);
+  height: clamp(15px, 5.5cqw, 24px);
+}
+
+.audio-scrub .media-loop-btn.active {
+  color: var(--color-accent) !important;
+}
+
+/* v7.x — real per-card volume level slider, next to the mute button.
+   Deliberately compact and fixed-width (not flex:1 like .scrub-bar) —
+   it's a secondary control, not the primary seek interaction. */
+.video-scrub .media-volume-slider,
+.audio-scrub .media-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: clamp(28px, 12cqw, 52px);
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-border-2);
+  cursor: pointer;
+  flex-shrink: 0;
+  accent-color: var(--color-accent);
+}
+
+.video-scrub .media-volume-slider::-webkit-slider-thumb,
+.audio-scrub .media-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  cursor: pointer;
+}
+
+.card:hover .video-scrub {
+  opacity: 1;
+}
+
+/* ── 3D model card (v7.x) ──
+   Functional toolbar (mode switch, background swatch, reset, anim
+   scrub) styled to match the rest of the app's control chrome. The
+   background swatch is still a native OS color picker under the hood
+   (`<input type="color">`) — replacing it with a real custom picker is
+   tracked as its own follow-up, shared with the other two native color
+   pickers in the app (the color-card swatch, the annotation tool's
+   picker), not something worth rebuilding three times separately. */
+.card-model3d-loading .model3d-viewport,
+.card-model3d-loading .model3d-toolbar {
+  visibility: hidden;
+}
+
+.model3d-viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.model3d-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.model3d-toolbar {
+  /* Direct feedback, live user audit: this used to be bottom:0 inside
+     the card, overlaying the viewport on hover — covering the model
+     itself and the card-bar name label sitting near the same corner.
+     top:100% renders it in a strip directly BELOW the card's own
+     bottom edge instead, the same "extends past the declared bounds"
+     approach this app's own resize handles already use (negative-
+     offset positioning outside the nominal box) — so hovering reveals
+     an extra strip rather than covering anything. pointer-events
+     toggles with opacity so the (usually invisible) strip below the
+     card doesn't swallow clicks meant for whatever's underneath it
+     when not hovering. */
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--color-chrome);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  z-index: 3;
+}
+
+.card:hover .model3d-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The render-mode strip sits BELOW the card (top:100%), but .card is
+   overflow:hidden, so it was clipped away entirely: the hover strip never
+   actually showed. Found 2026-09-21 by taking a real screenshot (a DOM
+   check said the strip was "visible, opacity 1"). 3D cards now overflow,
+   and the children that relied on the card's clipping round their own
+   corners instead. */
+.card.card-model3d {
+  overflow: visible;
+}
+
+.card-model3d .model3d-viewport {
+  border-radius: calc(var(--radius-card) - 1px);
+  overflow: hidden;
+}
+
+.card-model3d .card-bar {
+  border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px);
+}
+
+.model3d-mode-group {
+  display: flex;
+  flex-wrap: wrap; /* six modes: wrap on a narrow card rather than overflow it */
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.model3d-mode-btn {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  border-radius: 5px;
+  color: var(--color-text-2);
+  font-size: 10px;
+  padding: 3px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.model3d-mode-btn.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-contrast, #fff);
+}
+
+.model3d-mode-picker {
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+/* Popup list for the 3D strip's view-mode and camera menus. */
+.model3d-menu {
+  position: fixed;
+  z-index: 100000;
+  min-width: 168px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--color-chrome);
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  font-family: var(--font-ui);
+  user-select: none;
+}
+
+.model3d-menu-head {
+  padding: 6px 8px 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-3);
+}
+
+.model3d-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+
+.model3d-menu-item:hover { background: var(--color-surface-2); color: var(--color-text); }
+.model3d-menu-item.active { color: var(--color-accent); }
+.model3d-menu-item.disabled { opacity: 0.4; cursor: not-allowed; }
+.model3d-menu-item.disabled:hover { background: none; color: var(--color-text-2); }
+
+.model3d-menu-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.model3d-menu-item.active .model3d-menu-dot { background: var(--color-accent); }
+
+.model3d-lost-note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--color-text-2);
+  background: rgba(10, 10, 16, 0.55);
+  pointer-events: none;
+}
+
+.model3d-bg-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--color-border-2);
+  border-radius: 5px;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.model3d-reset-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-2);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+/* The animation controls used to be a translucent band laid over the bottom
+   of the viewport, 18px into the name/meta row: it hid the lower part of the
+   model and the card name, and its time text was clipped ("0:00 / 0").
+   They now live in the hover strip under the card, as a second row, where
+   they cover nothing. */
+.model3d-toolbar {
+  flex-wrap: wrap;
+}
+
+.card .model3d-toolbar .model3d-anim-scrub {
+  position: static;
+  flex: 1 0 100%;
+  height: 24px;
+  padding: 0 2px;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  color: var(--color-text-2);
+  opacity: 1;
+  border-top: 1px solid var(--color-border);
+  padding-top: 4px;
+  box-sizing: content-box;
+}
+
+.card .model3d-toolbar .model3d-anim-scrub .scrub-time {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+/* Onion-skin ghost (v6.x) — sits above the video itself but below the
+   progress line/scrub controls; drawn at reduced alpha directly on the
+   canvas (see cards.js's captureOnionGhost), not via CSS opacity, so a
+   fully redrawn frame always fully replaces the previous ghost instead
+   of stacking translucency on translucency. */
+.video-onion-canvas {
+  z-index: 1;
+}
+
+/* Always-visible thin progress line — sits at the bottom edge of the
+   video content, right above the card bar, regardless of hover. */
+.video-progress-line {
+  position: absolute;
+  bottom: 52px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.video-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--color-accent);
+}
+
+/* Draggable scrub thumb — shared by video + audio scrub bars */
+.scrub-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  width: clamp(8px, 3cqw, 12px);
+  height: clamp(8px, 3cqw, 12px);
+  background: var(--color-accent);
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Playback speed picker */
+.speed-picker-btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-2);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  border-radius: 5px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.speed-picker-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.speed-picker-btn.active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+/* ── Audio card ── */
+
+.audio-icon-area {
+  /* Real bug found via live user audit: the icon below sized itself
+     off container WIDTH only (cqw), with nothing tying it to this
+     element's own HEIGHT — which is a fixed subtraction of the label
+     row and scrub bar from the card's total height, not something that
+     scales with width at all. On any realistically wide-but-short
+     audio card (the actual 280×100 default included, not just an edge
+     case), the icon's width-derived size exceeded the space this
+     element's own height formula left for it, and got visibly clipped
+     by this element's own overflow:hidden. container-type:size (not
+     just the ancestor .card's inline-size) makes cqh available scoped
+     to just this element, so the icon can be constrained by BOTH axes
+     — this element already has an explicit, resolved height from the
+     calc() below, so containing its own size costs nothing here. */
+  container-type: size;
+  position: relative;
+  width: 100%;
+  height: calc(100% - 24px - clamp(30px, 11cqw, 50px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(var(--color-accent-rgb), 0.05), var(--color-surface) 72%);
+  overflow: hidden;
+}
+
+.audio-icon-area .audio-icon-svg {
+  width: clamp(20px, min(25cqw, 55cqh), 56px);
+  height: clamp(20px, min(25cqw, 55cqh), 56px);
+  position: relative;
+  z-index: 1;
+}
+
+/* Subtle pulse while playing — stops on pause/ended */
+@keyframes audio-icon-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%      { opacity: 0.7; transform: scale(1.06); }
+}
+
+.card.audio-playing .audio-icon-svg {
+  animation: audio-icon-pulse 1.1s ease-in-out infinite;
+}
+
+/* Static waveform, generated once from the decoded audio buffer —
+   purely decorative, sits behind the icon at low opacity so each
+   audio card looks visually distinct. */
+.audio-waveform {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 14%;
+  opacity: 0.15;
+  pointer-events: none;
+}
+
+.audio-waveform span {
+  flex: 1;
+  min-width: 1px;
+  max-width: 5px;
+  background: var(--color-accent);
+  border-radius: 2px;
+  align-self: center;
+}
+
+.audio-scrub {
+  position: absolute;
+  bottom: 52px;
+  left: 0;
+  right: 0;
+  height: clamp(30px, 11cqw, 50px);
+  display: flex;
+  align-items: center;
+  padding: 0 clamp(6px, 2.5cqw, 14px);
+  gap: clamp(4px, 2cqw, 10px);
+  background: var(--color-chrome);
+  /* Bug bounty fix: "make this minimal like text or normal img cards" —
+     used to be permanently opacity:1 (reasoned, at the time, that audio
+     has no preview frame to reveal it on hover the way video does) —
+     but that's exactly what made an audio card busier by default than
+     every other type: full play/volume/loop/time controls always on
+     screen even at rest, next to a plain waveform icon that alone
+     already reads as "this is audio." Hover/selected-only now, the
+     same reveal video-scrub already uses just below — the controls are
+     still one hover away, not gone. */
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 3;
+}
+
+.card:hover .audio-scrub,
+.card.selected .audio-scrub {
+  opacity: 1;
+}
+
+.video-scrub .scrub-bar,
+.audio-scrub .scrub-bar {
+  flex: 1;
+  min-width: 0;
+  height: clamp(4px, 1.5cqw, 8px);
+  background: var(--color-border-2);
+  border-radius: clamp(2px, 0.8cqw, 4px);
+  cursor: pointer;
+  position: relative;
+  /* Enlarge click target beyond visible bar */
+  padding: clamp(4px, 1.5cqw, 8px) 0;
+  background-clip: content-box;
+}
+
+.video-scrub .scrub-fill,
+.audio-scrub .scrub-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: clamp(2px, 0.8cqw, 4px);
+  pointer-events: none;
+}
+
+.video-scrub .scrub-time,
+.audio-scrub .scrub-time {
+  font-family: var(--font-mono);
+  font-size: clamp(10px, 3.5cqw, 16px);
+  color: var(--color-text-3);
+  white-space: nowrap;
+  /* Audit fix (4.7.0): this collapsing used to be a plain `display:none`
+     flip at the container-query breakpoints below — display can't be
+     transitioned, so the control just popped in/out of existence mid-
+     resize instead of shrinking away. max-width+opacity+margin ARE all
+     animatable, so crossing the same breakpoints now animates smoothly
+     instead of snapping. overflow:hidden keeps the (now zero-width)
+     time text from spilling out while it's collapsed. */
+  overflow: hidden;
+  max-width: 60px;
+  opacity: 1;
+  transition: max-width 0.15s ease, opacity 0.15s ease, margin-left 0.15s ease;
+}
+
+/* Video's own scrim is fixed-dark (see .video-scrub above); its time
+   label needs a light muted tone to match, overriding the shared rule
+   above which is tuned for audio's themed (light-in-light-mode)
+   background instead. */
+.video-scrub .scrub-time {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.media-mute-btn {
+  /* min-width (set above, per card type) beats max-width when they
+     conflict — both need to collapse to 0 together below, or min-width
+     would win and the button would refuse to actually shrink. Needs an
+     explicit numeric max-width here too (not the default `none`), since
+     a transition can't interpolate from a non-length value. */
+  max-width: 40px;
+  transition: max-width 0.15s ease, min-width 0.15s ease, opacity 0.15s ease, margin-left 0.15s ease;
+  overflow: hidden;
+}
+
+/* Collapse time + mute on very small cards to prevent overflow — same
+   visual result as the old display:none, but animated (see above). */
+@container card (max-width: 140px) {
+  .scrub-time, .media-mute-btn {
+    max-width: 0;
+    min-width: 0;
+    opacity: 0;
+    margin-left: 0;
+    pointer-events: none;
+  }
+}
+
+@container card (max-width: 200px) {
+  .scrub-time {
+    max-width: 0;
+    opacity: 0;
+    margin-left: 0;
+    pointer-events: none;
+  }
+}
+
+/* ── Context menu ── */
+#context-menu {
+  position: fixed;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  padding: 5px;
+  min-width: 168px;
+  z-index: 70000;
+  pointer-events: auto;
+  box-shadow: var(--shadow-context-menu);
+  display: none;
+}
+
+#context-menu.visible {
+  display: block;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--color-text-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.ctx-item:hover {
+  background: var(--tint-hover);
+  color: var(--color-text);
+}
+
+.ctx-item.danger:hover {
+  background: var(--color-red-bg);
+  color: var(--color-red);
+}
+
+.ctx-sep {
+  height: 1px;
+  background: var(--color-border);
+  margin: 3px 4px;
+}
+
+.ctx-shortcut {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-3);
+  background: var(--color-surface-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+}
+
+/* ── Toasts ── */
+#toast-container {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 99999;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--color-text);
+  white-space: nowrap;
+  box-shadow: 0 4px 16px var(--color-shadow);
+  animation: toast-in 0.2s ease;
+  /* #toast-container has pointer-events:none so toasts never block
+     clicks on the canvas underneath by default — each toast opts back
+     in individually so an error's close button (and hover-to-pause,
+     see app.js's toast()) actually work. */
+  pointer-events: auto;
+}
+
+.toast-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.65;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 0 0 4px;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+.toast.error {
+  border-color: var(--color-red);
+  background: var(--color-red-bg);
+  color: var(--color-red);
+  /* Debuggability fix: error toasts now often carry an appended real
+     error-detail excerpt (see errors.js's handle()) on top of the
+     catalog message + action text — three sentences easily runs past
+     what fits on one line at the base .toast's `white-space: nowrap`,
+     which would just overflow off-screen instead of wrapping, making
+     the whole point of showing the detail moot. Error toasts alone get
+     a cap + wrap; success/warning toasts stay short one-liners as
+     before. */
+  white-space: normal;
+  max-width: 480px;
+  line-height: 1.4;
+}
+
+.toast.success {
+  border-color: var(--color-green);
+  color: var(--color-green);
+}
+
+.toast.warning {
+  border-color: var(--color-amber);
+  color: var(--color-amber);
+}
+
+.toast.out {
+  animation: toast-out 0.2s ease forwards;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(8px); }
+}
+
+/* ── Dialogs ── */
+#dialog-overlay {
+  /* This single overlay handles every confirm/prompt in the app (delete
+     profile, discard changes, reset settings, etc.), including ones
+     triggered from inside another overlay — About (60000), the Manage
+     Profiles dialog (99997), the Home Screen (99998). It must always
+     render on top of whatever opened it, so its z-index has to beat
+     every other modal overlay in the app, not just the canvas UI. */
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  display: none;
+}
+
+#dialog-overlay.visible {
+  display: flex;
+  /* Polish fix: this is the single most-seen surface in the whole app
+     (every save/delete/reset/update confirmation goes through here) and
+     it used to have zero entrance animation — instant pop while every
+     other modal-style overlay (About, below) fades and scales in.
+     Matching that same treatment here. */
+  animation: modal-overlay-in 0.15s ease-out;
+}
+
+.dialog {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  min-width: 300px;
+  max-width: 480px;
+  box-shadow: 0 16px 48px var(--color-shadow);
+  animation: about-card-in 0.2s cubic-bezier(0.16,1,0.3,1);
+}
+
+/* Direct feedback: "make export as screen bit bigger its so compact" —
+   the plain 480px confirm-dialog width read as cramped once a real form
+   (format/quality/size rows) is inside it. Applied only while that form
+   is showing (showExportPicker toggles this class), so a normal Yes/No
+   confirm keeps its original compact size. */
+.dialog-box-wide {
+  min-width: 420px;
+  max-width: 560px;
+  padding: 28px;
+}
+
+.dialog h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 10px;
+}
+
+.dialog p {
+  font-size: 13px;
+  color: var(--color-text-2);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.dialog-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  margin-bottom: 20px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.dialog-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.dialog-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Export-as-format picker (showExportPicker, app.js) */
+.dialog-export-form {
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.dialog-export-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dialog-export-row label {
+  width: 56px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-2);
+}
+
+.dialog-export-row select {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.dialog-export-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--color-accent);
+}
+
+.dialog-export-row span {
+  width: 36px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-2);
+}
+
+.dialog-link-form {
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.dialog-link-url {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-accent);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.dialog-link-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.btn {
+  padding: 7px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  color: var(--color-text-2);
+  background: var(--color-surface-2);
+}
+
+.btn:hover {
+  background: var(--color-surface-3);
+  color: var(--color-text);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn.primary {
+  background: var(--color-accent);
+  color: var(--color-text-inv);
+  border-color: var(--color-accent);
+}
+
+.btn.primary:hover {
+  background: var(--color-accent-dim);
+}
+
+.btn.danger {
+  background: var(--color-red-bg);
+  color: var(--color-red);
+  border-color: var(--color-red);
+}
+
+.btn.danger:hover {
+  background: var(--color-red);
+  color: #fff;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-2);
+}
+
+/* ── Utility ── */
+.hidden { display: none !important; }
+.invisible { visibility: hidden; }
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── About screen ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  /* Live-audit catch: 60000 sat BELOW #startup-screen (the Home
+     Screen, position:fixed, opaque, z-index:99998) — the About screen
+     is reachable from the Home Screen's own account menu, so opening
+     it there rendered nothing visible at all, even though the overlay
+     genuinely existed in the DOM. Same root cause, same fix already
+     applied to Top Mode's badge/border (v8.8.2) and the Shortcuts/
+     Official-Plugins overlays below: raised to 99999, matching the
+     first-run overlay's own already-correct value. */
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: modal-overlay-in 0.15s ease-out;
+}
+
+@keyframes modal-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.about-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  padding: 36px 32px 28px;
+  width: 320px;
+  text-align: center;
+  box-shadow: 0 20px 56px var(--color-shadow);
+  animation: about-card-in 0.2s cubic-bezier(0.16,1,0.3,1);
+}
+
+@keyframes about-card-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.about-logo { margin-bottom: 14px; }
+.about-logo img { border-radius: 50%; display: block; margin: 0 auto; }
+
+.about-title {
+  font-size: 23px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+}
+
+.about-subtitle {
+  font-size: 13px;
+  color: var(--color-text-3);
+  margin-bottom: 18px;
+}
+
+.about-version {
+  display: inline-block;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--color-text-2);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 3px 12px;
+  margin-bottom: 10px;
+}
+
+.about-update-status {
+  font-size: 11px;
+  color: var(--color-text-3);
+  min-height: 16px;
+  margin-bottom: 4px;
+}
+
+.about-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 16px 0;
+}
+
+.about-author {
+  font-size: 13px;
+  color: var(--color-text-2);
+  margin-bottom: 3px;
+}
+.about-author strong { color: var(--color-text); font-weight: 600; }
+
+.about-studio {
+  font-size: 11.5px;
+  color: var(--color-text-3);
+  margin-bottom: 16px;
+}
+
+.about-desc {
+  font-size: 12px;
+  color: var(--color-text-3);
+  line-height: 1.7;
+}
+
+.about-btn {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  border-radius: 7px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  margin-bottom: 8px;
+}
+
+/* Shared "secondary" outline look — Update, GitHub, and Keyboard
+   Shortcuts are all the same visual weight (a plain button, not the
+   only-one-of-these Close). Was two separately-declared, byte-for-byte
+   identical rule blocks (.about-btn-update / .about-btn-github); a
+   bare .about-btn (the new Keyboard Shortcuts button) would otherwise
+   need a THIRD copy just to look like a real button instead of unstyled
+   text. */
+.about-btn:not(.about-btn-close) {
+  background: transparent;
+  border: 1px solid var(--color-border-2);
+  color: var(--color-text-2);
+}
+.about-btn:not(.about-btn-close):hover {
+  background: var(--color-surface-2);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.about-btn-close {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-2);
+  color: var(--color-text-2);
+  margin-bottom: 0;
+}
+.about-btn-close:hover {
+  background: var(--color-surface-3);
+}
+
+/* ── Properties panel slide-in (left-anchored panel) ── */
+@keyframes panel-slide-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Right-anchored panel slide-in (Inspector, Settings) — polish fix:
+   these two are structurally identical siblings of Properties above
+   (same fixed/right-or-left/top/bottom side-panel treatment) but had
+   no entrance animation at all, so opening Connections (C) right after
+   Properties (E) felt like two different apps. Mirrors panel-slide-in's
+   direction (nudge in from just outside the panel's own edge) but from
+   the right, matching where these two panels actually dock. ── */
+@keyframes panel-slide-in-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ── MoodLock (app.js) ──
+   Hides ALL of Kanvaz's own chrome. Names are .mood-lock-* on purpose: the older
+   .moodlock-* rules above belong to the toolbar auto-hide mechanic. */
+body.mood-lock-active #top-chrome,
+body.mood-lock-active #side-panel,
+body.mood-lock-active #statusbar,
+body.mood-lock-active #minimap-wrap {
+  display: none !important;
+}
+
+#mood-lock-control {
+  display: none;
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 99990;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-2);
+  box-shadow: 0 2px 10px var(--color-shadow);
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+#mood-lock-control:hover,
+#mood-lock-control:focus-within {
+  opacity: 1;
+}
+
+/* shown while Isolate View is on (the way in) and while MoodLock is on (the way out) */
+body.mood-lock-isolated #mood-lock-control,
+body.mood-lock-active #mood-lock-control {
+  display: flex;
+}
+
+/* The titlebar that normally moves the window is hidden by MoodLock, so the locked
+   state carries its own drag grip. */
+#mood-lock-grip {
+  display: none;
+  width: 14px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: move;
+  -webkit-app-region: drag;
+  background-image: radial-gradient(var(--color-text-3) 1.2px, transparent 1.4px);
+  background-size: 5px 5px;
+  background-position: center;
+  opacity: 0.8;
+}
+
+body.mood-lock-active #mood-lock-grip {
+  display: block;
+}
+
+#mood-lock-btn {
+  -webkit-app-region: no-drag;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+
+#mood-lock-btn:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+body.mood-lock-active #mood-lock-btn {
+  color: var(--color-accent);
+}
+
+/* MoodLock / Presentation Mode are read-only: a note's text box would otherwise still take focus on click
+   and accept typing, so make every editable control inside a card inert. */
+body.mood-lock-active .card textarea,
+body.mood-lock-active .card input,
+body.mood-lock-active .card [contenteditable],
+body.presentation-mode-active .card textarea,
+body.presentation-mode-active .card input,
+body.presentation-mode-active .card [contenteditable] {
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+/* MoodLock position counter ("3 / 12") shown while flipping through cards with the arrow keys */
+#mood-lock-pos {
+  display: none;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-3);
+  white-space: nowrap;
+}
+
+body.mood-lock-active #mood-lock-pos:not(:empty) {
+  display: block;
+}

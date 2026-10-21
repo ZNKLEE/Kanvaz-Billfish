@@ -1,0 +1,1409 @@
+/* annotate.js — per-card annotation overlay */
+
+var KanvazAnnotate = (function() {
+
+  var COLORS = ['#FF5A5A', '#F0A500', '#4A9EFF', '#4CAF82', '#FFFFFF', '#DCDCE8'];
+
+  /* Hoisted out of showToolbar() so properties.js's mirrored tool row
+     (the "add annotation tools to Properties too" ask) can build
+     identical buttons from the same source instead of a second,
+     drift-prone copy of these icon paths. */
+  var TOOLS = [
+    { id: 'pen',   title: 'Pen',       icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>' },
+    { id: 'highlighter', title: 'Highlighter', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>' },
+    { id: 'line',  title: 'Line',      icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>' },
+    { id: 'arrow', title: 'Arrow',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>' },
+    { id: 'rect',  title: 'Rectangle', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" ry="2"/></svg>' },
+    { id: 'ellipse', title: 'Ellipse', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12" rx="9" ry="6"/></svg>' },
+    { id: 'text',  title: 'Text',      icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>' },
+    { id: 'measure', title: 'Measure (pixel distance)', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="3"/><path d="M3 21l3-3M8 16l3-3M13 11l3-3M18 6l3-3" stroke-width="1.6"/></svg>' },
+    { id: 'eyedropper', title: 'Eyedropper (sample a color)', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 3.5l4 4-10.5 10.5-4.5 1 1-4.5L16.5 3.5z"/><line x1="13.5" y1="6.5" x2="17.5" y2="10.5"/></svg>' }
+  ];
+  var WIDTHS  = [2, 4, 8];
+  /* v7.x — session-scoped recent-colors row, same "in-memory only, reset
+     on restart" scope decision as cards.js's own recentTags — the pain
+     point is picking the same off-palette color repeatedly within one
+     working session, not remembering it across restarts. Capped at 6 so
+     the toolbar doesn't grow unbounded. */
+  var RECENT_COLORS_MAX = 6;
+  var recentColors = [];
+
+  var activeCardId  = null;
+  var activeCanvas  = null;
+  var activeCtx     = null;
+  var activeTool    = 'pen';
+  var activeColor   = '#FF5A5A';
+  var activeWidth   = 2;
+  /* v7.x — per-stroke opacity (0.15–1), set via the toolbar slider and
+     carried forward as "the last value picked," same as color/width.
+     Highlighter additionally hard-clamps to a max of 0.35 regardless of
+     the slider (see onMove/onUp) — the slider can still push it LOWER
+     than that for a very faint highlight, just never higher. */
+  var activeOpacity = 1;
+  var isDrawing     = false;
+  var startX        = 0;
+  var startY        = 0;
+  var snapshot      = null;
+  var overlays      = {};   /* cardId → { canvas, ctx, strokes, visible } */
+  var textInputEl   = null; /* the one live text-tool <input>, if any */
+
+  /* ── Attach overlay to a card element ── */
+
+  function attach(cardId, cardEl) {
+    if (overlays[cardId]) return;
+
+    var cvs = document.createElement('canvas');
+    cvs.className = 'annotation-canvas';
+    cvs.style.cssText = [
+      'position:absolute',
+      'top:0',
+      'left:0',
+      'width:100%',
+      'height:100%',
+      'pointer-events:none',
+      'z-index:8',
+      'border-radius:6px'
+    ].join(';');
+
+    /* HiDPI/Retina fix: the canvas BUFFER is sized in real device pixels
+       (CSS size * devicePixelRatio) so strokes render crisply, while the
+       CSS box (set via the width:100%/height:100% above) stays at the
+       card's normal size. ctx.scale(dpr, dpr) then lets every drawing
+       call below keep using plain CSS-pixel coordinates — getPos(),
+       stroke storage, and redraw() are all unchanged and still produce
+       the exact same numbers as before this fix (dpr used to be
+       implicitly 1 everywhere since the buffer was never enlarged), so
+       saved annotations stay pixel-identical across machines with
+       different display scaling. */
+    var dpr  = window.devicePixelRatio || 1;
+    /* Bug-bounty fix (v5.3.0): resolveCardSize() reads the card's own
+       inline style first, which stays correct even under a display:none
+       ancestor (e.g. attach() reached via loadStrokes() while Map View
+       is the active view) — offsetWidth/offsetHeight alone read 0 there
+       and used to fall through to the 300x200 literal below regardless
+       of the card's real size, undersizing the canvas buffer for the
+       rest of that session until an unrelated resize happened to fix it. */
+    var fallbackSize = resolveCardSize(cardEl);
+    var cssW = fallbackSize ? fallbackSize.w : 300;
+    var cssH = fallbackSize ? fallbackSize.h : 200;
+    cvs.width  = Math.round(cssW * dpr);
+    cvs.height = Math.round(cssH * dpr);
+
+    cardEl.appendChild(cvs);
+
+    var ctx = cvs.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    overlays[cardId] = {
+      canvas:  cvs,
+      ctx:     ctx,
+      strokes: [],
+      visible: true,
+      dpr:     dpr
+    };
+  }
+
+  /* ── Resize overlay when card resizes ── */
+
+  function resize(cardId, w, h) {
+    var ov = overlays[cardId];
+    if (!ov) return;
+
+    /* w/h arrive as the card's new CSS pixel size (see cards.js call
+       sites) — the canvas BUFFER stays dpr times larger, same as attach().
+       Audit fix: this used to prefer the dpr captured once back at
+       attach() time over a fresh read, so if the window moved to a
+       different-scaling monitor between attach() and this resize()
+       call, every future redraw kept using the stale value — the
+       overlay would render at the wrong sharpness for the display it's
+       actually on. Reading live first (and syncing ov.dpr to match)
+       means the very next resize — which fires whenever the card
+       itself is dragged to a new size, a fairly frequent event — self-
+       corrects instead of staying wrong for the rest of the session. */
+    var dpr = window.devicePixelRatio || ov.dpr || 1;
+    ov.dpr = dpr;
+    var oldW = ov.canvas.width;
+    var oldH = ov.canvas.height;
+    var newW = Math.round(w * dpr);
+    var newH = Math.round(h * dpr);
+
+    if (oldW === 0 || oldH === 0) {
+      ov.canvas.width  = newW;
+      ov.canvas.height = newH;
+      ov.ctx.scale(dpr, dpr);
+      return;
+    }
+
+    /* Setting canvas.width/height clears the pixel buffer (and resets
+       any transform, including the scale below), so snapshot the old
+       content onto a temp canvas first, then scale it back in via
+       drawImage — this makes annotations resize PROPORTIONALLY with
+       the card, matching the underlying media (which uses object-fit:
+       cover at 100% width/height). A naive getImageData/putImageData
+       pair would paste the old bitmap at its old pixel size into the
+       top-left corner instead of scaling. temp/getImageData/drawImage's
+       SOURCE rect all work in raw buffer pixels regardless of any
+       transform, so oldW/oldH (buffer pixels) are correct there; the
+       DESTINATION rect below is drawn through the freshly re-applied
+       dpr scale, so it uses w/h (CSS pixels) to land on the full new
+       buffer, exactly like attach()/getPos() do everywhere else. */
+    var temp = document.createElement('canvas');
+    temp.width  = oldW;
+    temp.height = oldH;
+    temp.getContext('2d').drawImage(ov.canvas, 0, 0);
+
+    ov.canvas.width  = newW;
+    ov.canvas.height = newH;
+    ov.ctx.scale(dpr, dpr);
+    ov.ctx.drawImage(temp, 0, 0, oldW, oldH, 0, 0, w, h);
+  }
+
+  /* ── Activate annotation mode on a card ── */
+
+  function activate(cardId) {
+    deactivate();
+
+    var ov = overlays[cardId];
+    if (!ov) {
+      var el = document.getElementById(cardId);
+      if (!el) return;
+      attach(cardId, el);
+      ov = overlays[cardId];
+    }
+
+    activeCardId = cardId;
+    activeCanvas = ov.canvas;
+    activeCtx    = ov.ctx;
+
+    activeCanvas.style.pointerEvents = 'all';
+    activeCanvas.style.cursor = 'crosshair';
+
+    showToolbar(cardId);
+    bindDrawEvents();
+  }
+
+  /* ── Deactivate ── */
+
+  function deactivate() {
+    if (!activeCardId) return;
+
+    /* Commit (not discard) a still-open text-tool input — same as
+       clicking anywhere else while typing already does via its own
+       blur handler. */
+    if (textInputEl) textInputEl.blur();
+
+    if (activeCanvas) {
+      activeCanvas.style.pointerEvents = 'none';
+      activeCanvas.style.cursor = 'default';
+      unbindDrawEvents();
+    }
+
+    hideToolbar();
+    activeCardId = null;
+    activeCanvas = null;
+    activeCtx    = null;
+  }
+
+  /* ── Draw events ── */
+
+  var boundMouseDown = null;
+  var boundMouseMove = null;
+  var boundMouseUp   = null;
+
+  function bindDrawEvents() {
+    boundMouseDown = function(e) { onDown(e); };
+    boundMouseMove = function(e) { onMove(e); };
+    boundMouseUp   = function(e) { onUp(e); };
+
+    activeCanvas.addEventListener('mousedown', boundMouseDown);
+    window.addEventListener('mousemove', boundMouseMove);
+    window.addEventListener('mouseup', boundMouseUp);
+  }
+
+  function unbindDrawEvents() {
+    if (!activeCanvas) return;
+    if (boundMouseDown) activeCanvas.removeEventListener('mousedown', boundMouseDown);
+    if (boundMouseMove) window.removeEventListener('mousemove', boundMouseMove);
+    if (boundMouseUp)   window.removeEventListener('mouseup', boundMouseUp);
+  }
+
+  /* Stroke points are stored as 0..1 fractions of the card's CSS
+     width/height, not absolute pixels — this is what makes annotations
+     resize correctly with the card, including across a save/reload
+     where resize()'s live bitmap-scaling never runs. Old saves (pre-4.9.1)
+     stored absolute pixel coordinates instead; loadStrokes() below
+     detects and one-time-converts those using the card's current size,
+     so the file naturally migrates to the new format on next save with
+     no explicit version field needed. */
+  /* Bug-bounty fix (v5.3.0): reads the card's OWN inline style first —
+     cards.js always sets el.style.width/height in pixels at render time
+     (renderCard, resize, resetSize), and unlike offsetWidth/offsetHeight
+     that value doesn't require layout, so it stays correct even when the
+     card sits inside a display:none ancestor (e.g. Map View is the
+     active view while a board loads). offsetWidth/offsetHeight is only
+     a fallback for a card element that somehow has no inline size set.
+     This used to read offsetWidth/offsetHeight first, which silently
+     read 0 under exactly that Map View condition and fell through to
+     attach()'s own hardcoded 300x200 default (see attach() below) —
+     migrateLegacyStroke() would then divide by the WRONG size and bake
+     permanently corrupted coordinates into card.annotations on the very
+     next save, a real, reachable data-loss bug for any pre-4.9.1 file
+     opened while Map View happened to be active. */
+  function resolveCardSize(cardEl) {
+    if (!cardEl) return null;
+    var sw = parseFloat(cardEl.style.width);
+    var sh = parseFloat(cardEl.style.height);
+    if (sw > 0 && sh > 0) return { w: sw, h: sh };
+    if (cardEl.offsetWidth && cardEl.offsetHeight) return { w: cardEl.offsetWidth, h: cardEl.offsetHeight };
+    return null;
+  }
+
+  function getCardSize(cardId) {
+    var size = resolveCardSize(document.getElementById(cardId));
+    if (size) return size;
+    var ov = overlays[cardId];
+    if (ov) return { w: ov.canvas.width / (ov.dpr || 1), h: ov.canvas.height / (ov.dpr || 1) };
+    return { w: 1, h: 1 };
+  }
+
+  /* Legacy absolute-pixel strokes always have coordinates far past 1
+     (cards are never sub-2px), so this threshold cleanly separates old
+     data from the new normalized format without needing a flag. */
+  function isLegacyPoint(v) {
+    return v > 1.5;
+  }
+
+  /* Bug-bounty fix (v5.3.0): used to check only the stroke's FIRST point
+     (or a rect/arrow's x1/y1) — a legacy stroke that happened to START
+     near a card's corner (e.g. x1=1, y1=1) but extended well past it
+     (x2=180, y2=140) was misclassified as already-normalized, skipped
+     migration entirely, and then got double-scaled by redraw() into
+     wildly wrong, permanent-once-resaved geometry. Checking every point
+     closes that gap — legacy data only ever has ALL coordinates as
+     absolute pixels, so any single one past the threshold is conclusive. */
+  function strokeLooksLegacy(s) {
+    /* Trust an explicit normalized:true marker outright — see the
+       comment where it's stamped onto every newly-created stroke in
+       onUp() above. Only a stroke saved before this flag existed (a true
+       legacy file) falls through to the magnitude heuristic below, which
+       can't tell "legacy absolute pixels" from "a modern normalized
+       coordinate that legitimately extends past the card" apart by
+       value alone. */
+    if (s.normalized === true) return false;
+
+    /* v7.x: highlighter shares pen's point-array shape — same legacy
+       check applies. text has its own shape (single x/y + a string) and
+       is a new-only tool with nothing legacy to migrate, so it's simply
+       never legacy. */
+    if ((s.tool === 'pen' || s.tool === 'highlighter') && s.points && s.points.length) {
+      for (var i = 0; i < s.points.length; i++) {
+        if (isLegacyPoint(s.points[i].x) || isLegacyPoint(s.points[i].y)) return true;
+      }
+      return false;
+    }
+    if (s.points && s.points.x1 !== undefined) {
+      return isLegacyPoint(s.points.x1) || isLegacyPoint(s.points.y1) ||
+             isLegacyPoint(s.points.x2) || isLegacyPoint(s.points.y2);
+    }
+    return false;
+  }
+
+  function migrateLegacyStroke(s, size) {
+    if ((s.tool === 'pen' || s.tool === 'highlighter') && s.points && s.points.length) {
+      for (var i = 0; i < s.points.length; i++) {
+        s.points[i] = { x: s.points[i].x / size.w, y: s.points[i].y / size.h };
+      }
+    } else if (s.points && s.points.x1 !== undefined) {
+      s.points = {
+        x1: s.points.x1 / size.w, y1: s.points.y1 / size.h,
+        x2: s.points.x2 / size.w, y2: s.points.y2 / size.h
+      };
+    }
+    /* Mark it done so a second pass (if anything ever re-checks this
+       exact stroke object later in the same session) trusts it rather
+       than re-running the magnitude heuristic against now-normalized
+       values that could themselves exceed 1.5. */
+    s.normalized = true;
+  }
+
+  function getPos(e) {
+    /* Plain CSS-pixel coordinates — the canvas context is scaled by
+       devicePixelRatio (see attach()/resize()), so drawing calls made
+       with these coordinates land correctly on the higher-resolution
+       buffer without needing to know dpr here. This used to multiply by
+       activeCanvas.width/rect.width as a buffer/CSS ratio, which was a
+       no-op when the buffer was always exactly CSS-sized (pre-HiDPI-fix)
+       — keeping this in CSS-pixel space is what keeps stored stroke
+       coordinates identical to before, across any devicePixelRatio.
+
+       Audit fix: the card (and this overlay canvas with it) lives inside
+       #canvas-world, which carries the board's pan/zoom `scale` — so
+       getBoundingClientRect() returns a rect already SCALED by it
+       (rect.width === cssWidth * scale). e.clientX/Y are raw screen
+       pixels, so the delta from rect.left/top is in scaled-screen-pixel
+       space, not the canvas's own CSS-pixel space the stroke data and
+       drawing calls use. That claim above ("no-op") was only ever true
+       at exactly 100% zoom — dividing by scale is what actually
+       converts screen pixels back to canvas-local CSS pixels; at any
+       other zoom, strokes landed offset from the cursor by exactly that
+       factor (crammed toward the corner when zoomed out, flung outside
+       the card when zoomed in). */
+    var rect = activeCanvas.getBoundingClientRect();
+    var scale = (typeof KanvazCanvas !== 'undefined' && KanvazCanvas.getScale) ? KanvazCanvas.getScale() : 1;
+    return {
+      x: (e.clientX - rect.left) / scale,
+      y: (e.clientY - rect.top) / scale
+    };
+  }
+
+  var currentPenPoints = [];
+  var lastPenPoint      = null;
+
+  function onDown(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    /* Eyedropper is a one-click sample, not a drag-drawn shape — never
+       enters the isDrawing lifecycle at all, so onMove/onUp both no-op
+       for it via their existing `if (!isDrawing) return` guards. */
+    if (activeTool === 'eyedropper') {
+      var epos = getPos(e);
+      var hex = sampleColorAt(activeCardId, epos.x, epos.y);
+      if (hex) {
+        activeColor = hex;
+        updateToolbar();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(hex).catch(function() {});
+        }
+        if (typeof KanvazUI !== 'undefined') KanvazUI.toast('Sampled ' + hex + ' — copied, and set as the active annotation color');
+      } else if (typeof KanvazUI !== 'undefined') {
+        KanvazUI.toast('Could not sample a color there', 'error');
+      }
+      return;
+    }
+
+    /* Text is a click-to-place tool, not a drag-drawn shape — same
+       "never enters isDrawing" carve-out as eyedropper above. Opens a
+       real <input> positioned right over the click point; the actual
+       stroke is only pushed once the user commits it (Enter/blur), in
+       finishTextInput() below. */
+    if (activeTool === 'text') {
+      startTextInput(e, getPos(e));
+      return;
+    }
+
+    isDrawing = true;
+    var pos = getPos(e);
+    startX = pos.x;
+    startY = pos.y;
+    currentPenPoints = [{ x: pos.x, y: pos.y }];
+
+    if (activeTool === 'pen' || activeTool === 'highlighter') {
+      /* Bug fix (v7.x, found while adding per-stroke opacity): the old
+         single-beginPath-for-the-whole-gesture approach meant every
+         mousemove's stroke() call re-strokes the ENTIRE path drawn so
+         far, not just the newest segment — invisible at the old fixed
+         alpha=1 (redrawing something fully opaque on top of itself is a
+         no-op visually), but with translucent strokes now possible
+         (opacity slider, highlighter), that compounding would make a
+         stroke visibly darken/solidify as more points get added, worst
+         at path curves that double back over themselves. Drawing one
+         short two-point segment per move event instead avoids the
+         cumulative re-composite; lastPenPoint tracks the joint between
+         segments. */
+      lastPenPoint = { x: startX, y: startY };
+    } else {
+      /* rect/arrow/line/ellipse/measure all use this snapshot (see
+         onMove: they repaint it before drawing each live-preview frame
+         so the in-progress shape doesn't smear). pen/highlighter never
+         read `snapshot`, so skip the full-canvas readback for those —
+         a real cost on a large annotation canvas, paid on every single
+         stroke for no reason. */
+      snapshot = activeCtx.getImageData(0, 0, activeCanvas.width, activeCanvas.height);
+    }
+  }
+
+  function onMove(e) {
+    if (!isDrawing) return;
+    var pos = getPos(e);
+
+    if (activeTool === 'pen' || activeTool === 'highlighter') {
+      currentPenPoints.push({ x: pos.x, y: pos.y });
+      activeCtx.save();
+      activeCtx.globalAlpha = activeTool === 'highlighter' ? Math.min(activeOpacity, 0.35) : activeOpacity;
+      activeCtx.strokeStyle = activeColor;
+      activeCtx.lineWidth   = activeTool === 'highlighter' ? Math.max(activeWidth, 10) : activeWidth;
+      activeCtx.lineCap     = 'round';
+      activeCtx.lineJoin    = 'round';
+      /* One short segment per move event, not one cumulative path re-
+         stroked every frame — see onDown's comment on why that matters
+         once strokes can be translucent. */
+      activeCtx.beginPath();
+      activeCtx.moveTo(lastPenPoint.x, lastPenPoint.y);
+      activeCtx.lineTo(pos.x, pos.y);
+      activeCtx.stroke();
+      activeCtx.restore();
+      lastPenPoint = pos;
+
+    } else if (activeTool === 'rect') {
+      activeCtx.putImageData(snapshot, 0, 0);
+      activeCtx.save();
+      activeCtx.globalAlpha = activeOpacity;
+      activeCtx.strokeStyle = activeColor;
+      activeCtx.lineWidth   = activeWidth;
+      activeCtx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
+      activeCtx.restore();
+
+    } else if (activeTool === 'ellipse') {
+      activeCtx.putImageData(snapshot, 0, 0);
+      activeCtx.save();
+      activeCtx.globalAlpha = activeOpacity;
+      drawEllipse(activeCtx, startX, startY, pos.x, pos.y, activeColor, activeWidth);
+      activeCtx.restore();
+
+    } else if (activeTool === 'line') {
+      activeCtx.putImageData(snapshot, 0, 0);
+      activeCtx.save();
+      activeCtx.globalAlpha = activeOpacity;
+      activeCtx.strokeStyle = activeColor;
+      activeCtx.lineWidth   = activeWidth;
+      activeCtx.lineCap     = 'round';
+      activeCtx.beginPath();
+      activeCtx.moveTo(startX, startY);
+      activeCtx.lineTo(pos.x, pos.y);
+      activeCtx.stroke();
+      activeCtx.restore();
+
+    } else if (activeTool === 'arrow') {
+      activeCtx.putImageData(snapshot, 0, 0);
+      activeCtx.save();
+      activeCtx.globalAlpha = activeOpacity;
+      drawArrow(activeCtx, startX, startY, pos.x, pos.y, activeColor, activeWidth);
+      activeCtx.restore();
+
+    } else if (activeTool === 'measure') {
+      /* Measure is deliberately never translucent — it's a temporary
+         analysis readout, not a piece of the actual annotation content,
+         and a dimmed measurement line/label would be harder to read
+         for zero benefit. */
+      activeCtx.putImageData(snapshot, 0, 0);
+      drawMeasureLine(activeCtx, startX, startY, pos.x, pos.y, activeColor, activeWidth);
+    }
+  }
+
+  function onUp(e) {
+    if (!isDrawing) return;
+    isDrawing = false;
+    var pos = getPos(e);
+    var isPointArray = (activeTool === 'pen' || activeTool === 'highlighter');
+
+    var size = getCardSize(activeCardId);
+    var stroke = {
+      tool:   activeTool,
+      color:  activeColor,
+      /* Highlighter's actual drawn width/opacity are clamped (see
+         onMove) — store what was really drawn, not the raw activeWidth/
+         activeOpacity, so redraw() reproduces the stroke exactly rather
+         than silently re-deriving a possibly-different clamp later. */
+      width:  activeTool === 'highlighter' ? Math.max(activeWidth, 10) : activeWidth,
+      opacity: activeTool === 'highlighter' ? Math.min(activeOpacity, 0.35) : activeOpacity,
+      points: isPointArray
+        ? currentPenPoints.map(function(p) { return { x: p.x / size.w, y: p.y / size.h }; })
+        : { x1: startX / size.w, y1: startY / size.h, x2: pos.x / size.w, y2: pos.y / size.h },
+      /* Audit fix: strokeLooksLegacy()'s only signal is "does any
+         coordinate exceed 1.5?" — a real, deliberate limitation for old
+         files with no version marker. But a BRAND NEW stroke dragged
+         more than ~1.5x the card's width/height outside its bounds
+         (annotations are allowed to extend past the card) produces
+         genuinely normalized coordinates that ALSO exceed 1.5, and used
+         to get misclassified as legacy and double-normalized by
+         migrateLegacyStroke() the next time the board loaded — silently
+         corrupting the stroke's position. Stamping every newly-created
+         stroke with normalized:true lets strokeLooksLegacy() trust it
+         outright instead of guessing from magnitude; only strokes from
+         before this flag existed (true old files) still need the
+         heuristic at all. */
+      normalized: true
+    };
+
+    if (isPointArray) {
+      lastPenPoint = null;
+    }
+
+    var ov = overlays[activeCardId];
+    if (ov) {
+      ov.strokes.push(stroke);
+      if (typeof KanvazCards !== 'undefined') KanvazCards.refreshAnnotationDot(activeCardId);
+      /* Audit fix (CRITICAL): drawing a stroke is a real, savable edit —
+         same as moving/resizing/deleting a card — but this never marked
+         the board dirty or pushed undo history, unlike clearAnnotations()
+         just below, which correctly does both. A session where the ONLY
+         edits were annotations would take the close dialog's "no unsaved
+         changes" fast path (which also wipes the crash-recovery cache),
+         permanently losing every stroke with no save prompt at all, and
+         Ctrl+Z right after drawing would silently do nothing (or undo
+         something unrelated) instead of removing the stroke. */
+      KanvazApp.markDirty();
+      KanvazHistory.push();
+    }
+  }
+
+  /* ── Text tool (v7.x) ──
+     Click to place a real <input> right over the click point (screen-
+     fixed, since the card itself can be panned/zoomed/dragged out from
+     under it while typing — matches every other transient input this
+     app already builds this way, e.g. the tab-rename input in
+     boards.js). Enter or blur-with-content commits it as a stroke;
+     Escape or blur-while-empty cancels with nothing drawn or stored. */
+  function startTextInput(e, pos) {
+    finishTextInput(); /* just in case one was already open */
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'annotate-text-input';
+    input.style.cssText = [
+      'position:fixed',
+      'left:' + e.clientX + 'px',
+      'top:' + (e.clientY - 2) + 'px',
+      'z-index:20002',
+      'background:var(--color-surface)',
+      'border:1px solid var(--color-accent)',
+      'border-radius:3px',
+      'color:' + activeColor,
+      'font-size:16px',
+      'font-family:sans-serif',
+      'padding:2px 4px',
+      'outline:none',
+      'min-width:120px'
+    ].join(';');
+    document.body.appendChild(input);
+    input.focus();
+
+    var pendingCardId = activeCardId;
+    var pendingCtx = activeCtx;
+    var committed = false;
+
+    function commit() {
+      /* Removing the input (below) fires its own native 'blur', and the
+         blur listener also calls commit() — guard against running this
+         twice (and double-pushing the same text as two strokes) for
+         the exact same logical "user is done typing" event. */
+      if (committed) return;
+      committed = true;
+
+      var text = input.value;
+      finishTextInput();
+      if (!text) return;
+
+      var size = getCardSize(pendingCardId);
+      var stroke = {
+        tool: 'text',
+        color: activeColor,
+        opacity: activeOpacity,
+        fontSize: 16,
+        point: { x: pos.x / size.w, y: pos.y / size.h },
+        text: text
+      };
+      /* Audit fix: this used to draw directly with no globalAlpha set at
+         all — every other tool's immediate on-canvas render wraps its
+         draw call in save()/globalAlpha=activeOpacity/restore() (see
+         the rect/ellipse/line/arrow branches above), but the text tool's
+         commit() path was missing it, so a text stamp always appeared
+         fully opaque on the canvas regardless of the opacity slider —
+         only the SAVED stroke object had the right value, meaning the
+         opacity only became visible after a reload/redraw. */
+      pendingCtx.save();
+      pendingCtx.globalAlpha = activeOpacity;
+      drawText(pendingCtx, pos.x, pos.y, text, activeColor, 16);
+      pendingCtx.restore();
+
+      var ov = overlays[pendingCardId];
+      if (ov) {
+        ov.strokes.push(stroke);
+        if (typeof KanvazCards !== 'undefined') KanvazCards.refreshAnnotationDot(pendingCardId);
+        KanvazApp.markDirty();
+        KanvazHistory.push();
+      }
+    }
+
+    input.addEventListener('keydown', function(ke) {
+      ke.stopPropagation();
+      if (ke.key === 'Enter') { ke.preventDefault(); commit(); }
+      if (ke.key === 'Escape') {
+        ke.preventDefault();
+        committed = true; /* cancel — same guard as commit(), just skips pushing a stroke */
+        finishTextInput();
+      }
+    });
+    input.addEventListener('blur', function() { commit(); });
+    input.addEventListener('mousedown', function(ke) { ke.stopPropagation(); });
+    textInputEl = input;
+  }
+
+  function finishTextInput() {
+    var el = document.getElementById('annotate-text-input');
+    /* Audit fix: the el.parentNode check alone isn't a reliable guard —
+       found live, not by static review. removeChild() can still throw
+       "node is no longer a child of this node" even right after
+       confirming el.parentNode is truthy, if something else (a card
+       switch mid-edit, deactivate() tearing down the whole overlay)
+       already detached this exact element between the check and the
+       call. The intent here is just "make sure this input isn't in the
+       DOM anymore" — that's equally true whether removeChild succeeds
+       or was already redundant, so swallow the race instead of letting
+       it surface as an uncaught-exception toast. */
+    if (el && el.parentNode) {
+      try { el.parentNode.removeChild(el); } catch (e) { /* already detached by something else */ }
+    }
+    textInputEl = null;
+  }
+
+  /* ── Arrow drawing ── */
+
+  /* ── Ellipse (v7.x) — bounding-box shape, same {x1,y1,x2,y2} storage
+     as rect/arrow/line, so it gets the same 0..1 normalization and
+     legacy-migration handling automatically (strokeLooksLegacy()/
+     migrateLegacyStroke() branch on "does this stroke have x1", not on
+     a tool-name allowlist). */
+  function drawEllipse(ctx, x1, y1, x2, y2, color, width) {
+    var cx = (x1 + x2) / 2;
+    var cy = (y1 + y2) / 2;
+    var rx = Math.abs(x2 - x1) / 2;
+    var ry = Math.abs(y2 - y1) / 2;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  /* ── Text stamp (v7.x) ── */
+  function drawText(ctx, x, y, text, color, fontSize) {
+    if (!text) return;
+    ctx.font = fontSize + 'px sans-serif';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(text, x, y);
+  }
+
+  function drawArrow(ctx, x1, y1, x2, y2, color, width) {
+    var headLen = 12 + width * 2;
+    var angle   = Math.atan2(y2 - y1, x2 - x1);
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = width;
+    ctx.lineCap     = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(
+      x2 - headLen * Math.cos(angle - Math.PI / 6),
+      y2 - headLen * Math.sin(angle - Math.PI / 6)
+    );
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(
+      x2 - headLen * Math.cos(angle + Math.PI / 6),
+      y2 - headLen * Math.sin(angle + Math.PI / 6)
+    );
+    ctx.stroke();
+  }
+
+  /* ── Measure line (v6.x — ArtDeck-inspired analysis tools) ──
+     Stored exactly like 'arrow' (same {x1,y1,x2,y2} shape as everything
+     else that isn't 'pen'), so it gets the same 0..1 normalization and
+     legacy-migration handling automatically — strokeLooksLegacy()/
+     migrateLegacyStroke() branch on "does this stroke have x1" already,
+     not on a tool-name allowlist. The distance readout is computed from
+     the CURRENT on-screen pixel positions at draw time, in the card's
+     own rendered pixel space — not the underlying image's native
+     resolution, which annotate.js has no reliable way to know for a
+     video, and would silently disagree with the drawn line's own length
+     if the two ever diverged. */
+  function drawMeasureLine(ctx, x1, y1, x2, y2, color, width) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = width;
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+
+    var dist = Math.round(Math.hypot(x2 - x1, y2 - y1));
+    var midX = (x1 + x2) / 2;
+    var midY = (y1 + y2) / 2;
+    var label = dist + 'px';
+
+    ctx.font = '11px sans-serif';
+    var textW = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(midX - textW / 2 - 4, midY - 15, textW + 8, 14);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, midX, midY - 8);
+  }
+
+  /* ── Eyedropper (v6.x) ──
+     Samples the underlying MEDIA element's actual pixel, not the mostly-
+     transparent annotation overlay canvas above it — drawImage()s the
+     media onto a throwaway canvas first, replicating CSS object-fit's
+     own crop/letterbox math (cover vs. contain) so the sampled point
+     actually lines up with what's visually under the cursor. Returns
+     '#rrggbb' or null (video not yet loaded, image failed, etc.). */
+  function sampleColorAt(cardId, cssX, cssY) {
+    var cardEl = document.getElementById(cardId);
+    if (!cardEl) return null;
+    var media = cardEl.querySelector('img, video');
+    if (!media) return null;
+
+    var naturalW = media.tagName === 'VIDEO' ? media.videoWidth  : media.naturalWidth;
+    var naturalH = media.tagName === 'VIDEO' ? media.videoHeight : media.naturalHeight;
+    if (!naturalW || !naturalH) return null;
+
+    var box = cardEl.getBoundingClientRect();
+    var boxW = box.width, boxH = box.height;
+    if (!boxW || !boxH) return null;
+
+    var fit = (typeof KanvazCards !== 'undefined' && KanvazCards.getAll) ?
+      (KanvazCards.getAll()[cardId] || {}).objectFit : null;
+    var mode = fit === 'contain' ? Math.min : Math.max;
+    var scale = mode(boxW / naturalW, boxH / naturalH);
+    var drawW = naturalW * scale, drawH = naturalH * scale;
+    var offsetX = (boxW - drawW) / 2, offsetY = (boxH - drawH) / 2;
+
+    var tmp = document.createElement('canvas');
+    tmp.width = boxW;
+    tmp.height = boxH;
+    var tctx = tmp.getContext('2d');
+    try {
+      tctx.drawImage(media, offsetX, offsetY, drawW, drawH);
+      var data = tctx.getImageData(Math.round(cssX), Math.round(cssY), 1, 1).data;
+      return '#' + [data[0], data[1], data[2]].map(function(c) {
+        var h = c.toString(16);
+        return h.length === 1 ? '0' + h : h;
+      }).join('');
+    } catch (e) {
+      /* Cross-origin-tainted canvas or similar — sampling just isn't
+         possible for this media, not a bug to surface loudly. */
+      return null;
+    }
+  }
+
+  /* ── Redraw all strokes from JSON ── */
+
+  function redraw(cardId) {
+    var ov = overlays[cardId];
+    if (!ov) return;
+    /* clearRect (unlike getImageData/putImageData) respects the ctx.scale
+       transform from attach()/resize(), so divide back to CSS-pixel
+       units here — using the raw buffer size would ask it to clear a
+       dpr-times-too-large area. Harmless in practice (clipped to the
+       canvas either way) but dimensionally correct this way. */
+    ov.ctx.clearRect(0, 0, ov.canvas.width / (ov.dpr || 1), ov.canvas.height / (ov.dpr || 1));
+    var size = getCardSize(cardId);
+    for (var i = 0; i < ov.strokes.length; i++) {
+      var s = ov.strokes[i];
+      /* Old files predate per-stroke opacity entirely — default to fully
+         opaque so they redraw pixel-identical to before this feature. */
+      var op = s.opacity !== undefined ? s.opacity : 1;
+
+      if ((s.tool === 'pen' || s.tool === 'highlighter') && s.points && s.points.length) {
+        ov.ctx.save();
+        ov.ctx.globalAlpha = op;
+        ov.ctx.strokeStyle = s.color;
+        ov.ctx.lineWidth   = s.width;
+        ov.ctx.lineCap     = 'round';
+        ov.ctx.lineJoin    = 'round';
+        ov.ctx.beginPath();
+        ov.ctx.moveTo(s.points[0].x * size.w, s.points[0].y * size.h);
+        for (var j = 1; j < s.points.length; j++) {
+          ov.ctx.lineTo(s.points[j].x * size.w, s.points[j].y * size.h);
+        }
+        ov.ctx.stroke();
+        ov.ctx.restore();
+      } else if (s.tool === 'rect' && s.points) {
+        ov.ctx.save();
+        ov.ctx.globalAlpha = op;
+        ov.ctx.strokeStyle = s.color;
+        ov.ctx.lineWidth   = s.width;
+        ov.ctx.strokeRect(
+          s.points.x1 * size.w, s.points.y1 * size.h,
+          (s.points.x2 - s.points.x1) * size.w, (s.points.y2 - s.points.y1) * size.h
+        );
+        ov.ctx.restore();
+      } else if (s.tool === 'ellipse' && s.points) {
+        ov.ctx.save();
+        ov.ctx.globalAlpha = op;
+        drawEllipse(ov.ctx, s.points.x1 * size.w, s.points.y1 * size.h, s.points.x2 * size.w, s.points.y2 * size.h, s.color, s.width);
+        ov.ctx.restore();
+      } else if (s.tool === 'line' && s.points) {
+        ov.ctx.save();
+        ov.ctx.globalAlpha = op;
+        ov.ctx.strokeStyle = s.color;
+        ov.ctx.lineWidth   = s.width;
+        ov.ctx.lineCap     = 'round';
+        ov.ctx.beginPath();
+        ov.ctx.moveTo(s.points.x1 * size.w, s.points.y1 * size.h);
+        ov.ctx.lineTo(s.points.x2 * size.w, s.points.y2 * size.h);
+        ov.ctx.stroke();
+        ov.ctx.restore();
+      } else if (s.tool === 'arrow' && s.points) {
+        ov.ctx.save();
+        ov.ctx.globalAlpha = op;
+        drawArrow(ov.ctx, s.points.x1 * size.w, s.points.y1 * size.h, s.points.x2 * size.w, s.points.y2 * size.h, s.color, s.width);
+        ov.ctx.restore();
+      } else if (s.tool === 'measure' && s.points) {
+        /* Never translucent, see onMove's own comment on why. */
+        drawMeasureLine(ov.ctx, s.points.x1 * size.w, s.points.y1 * size.h, s.points.x2 * size.w, s.points.y2 * size.h, s.color, s.width);
+      } else if (s.tool === 'text' && s.point) {
+        ov.ctx.save();
+        ov.ctx.globalAlpha = op;
+        drawText(ov.ctx, s.point.x * size.w, s.point.y * size.h, s.text, s.color, s.fontSize || 16);
+        ov.ctx.restore();
+      }
+    }
+  }
+
+  /* ── Toggle visibility (H key) ── */
+
+  function toggleVisibility(cardId) {
+    var ov = overlays[cardId];
+    if (!ov) return;
+    ov.visible = !ov.visible;
+    ov.canvas.style.display = ov.visible ? '' : 'none';
+    KanvazUI.toast(ov.visible ? 'Annotations shown' : 'Annotations hidden');
+  }
+
+  /* ── Clear with confirm ── */
+
+  function clearAnnotations(cardId) {
+    KanvazUI.showDialog(
+      'Clear annotations?',
+      'This will permanently remove all drawings on this card.',
+      [
+        {
+          label: 'Clear',
+          cls: 'danger',
+          action: function() {
+            var ov = overlays[cardId];
+            if (!ov) return;
+            /* clearRect (unlike getImageData/putImageData) respects the
+               ctx.scale transform from attach()/resize(), so divide back
+               to CSS-pixel units here — using the raw buffer size would
+               ask it to clear a dpr-times-too-large area. Harmless in
+               practice (clipped to the canvas either way) but
+               dimensionally correct this way. */
+            ov.ctx.clearRect(0, 0, ov.canvas.width / (ov.dpr || 1), ov.canvas.height / (ov.dpr || 1));
+            ov.strokes = [];
+            if (typeof KanvazCards !== 'undefined') KanvazCards.refreshAnnotationDot(cardId);
+            KanvazApp.markDirty();
+            KanvazHistory.push();
+            KanvazUI.toast('Annotations cleared');
+          }
+        },
+        { label: 'Cancel', cls: 'primary', action: function() {} }
+      ]
+    );
+  }
+
+  /* ── Annotation toolbar ── */
+
+  var toolbarEl = null;
+
+  function showToolbar(cardId) {
+    if (toolbarEl) hideToolbar();
+
+    var cardEl = document.getElementById(cardId);
+    if (!cardEl) return;
+
+    var tb = document.createElement('div');
+    tb.id = 'annotate-toolbar';
+    tb.style.cssText = [
+      'position:fixed',
+      'z-index:20000',
+      'display:flex',
+      'align-items:center',
+      'flex-wrap:wrap',
+      /* v7.x — this row grew from 5 tools to 9 plus a color picker,
+         recent-colors row, and an opacity slider. Without a cap it ran
+         off the edge of the screen for a card near either side; wrapping
+         onto a second line keeps every control reachable regardless of
+         where the card sits or how narrow the window is. */
+      'max-width:min(92vw, 480px)',
+      'row-gap:4px',
+      'gap:4px',
+      'background:var(--color-surface)',
+      'border:1px solid var(--color-border-2)',
+      'border-radius:8px',
+      'padding:4px 8px',
+      /* Polish fix: hardcoded shadow that ignored Light theme. */
+      'box-shadow:0 4px 16px var(--color-shadow)',
+      'font-family:var(--font-ui)',
+      'font-size:11px'
+    ].join(';');
+
+    /* Tool buttons */
+    /* v7.x — icon set switched to Feather Icons (MIT license,
+       https://github.com/feathericons/feather) paths, verbatim, at
+       Feather's native 24x24 viewBox/stroke-width, for every tool that
+       has a real Feather equivalent (pen/arrow/rect/ellipse/text).
+       Highlighter/line/measure/eyedropper have no Feather icon to draw
+       from — kept as custom shapes but redrawn at the same 24-viewBox/
+       stroke-width-2 convention so the whole toolbar reads as one
+       consistent icon set rather than two different visual weights. */
+    for (var i = 0; i < TOOLS.length; i++) {
+      (function(tool) {
+        var btn = document.createElement('button');
+        btn.title = tool.title;
+        btn.innerHTML = tool.icon;
+        btn.style.cssText = 'background:' + (activeTool === tool.id ? 'var(--color-accent-bg)' : 'transparent') + ';border:1px solid ' + (activeTool === tool.id ? 'var(--color-accent)' : 'transparent') + ';border-radius:4px;cursor:pointer;color:var(--color-text);padding:4px 6px;display:flex;align-items:center;justify-content:center;';
+        btn.onclick = function() {
+          activeTool = tool.id;
+          updateToolbar();
+        };
+        /* v7.x — hover feedback so a bigger, denser toolbar still feels
+           responsive to point at, not just to click — same subtle
+           surface-tint-on-hover already used for the tab bar/chip rows
+           elsewhere in the app. Skipped for the currently-active tool,
+           which already has its own accent highlight. */
+        btn.onmouseenter = function() { if (activeTool !== tool.id) btn.style.background = 'var(--color-surface-2)'; };
+        btn.onmouseleave = function() { if (activeTool !== tool.id) btn.style.background = 'transparent'; };
+        btn.dataset.toolBtn = tool.id;
+        tb.appendChild(btn);
+      })(TOOLS[i]);
+    }
+
+    /* Separator */
+    var sep1 = document.createElement('div');
+    sep1.style.cssText = 'width:1px;height:16px;background:var(--color-border);margin:0 2px;';
+    tb.appendChild(sep1);
+
+    /* Color swatches */
+    for (var j = 0; j < COLORS.length; j++) {
+      (function(color) {
+        var swatch = document.createElement('button');
+        swatch.style.cssText = 'width:14px;height:14px;border-radius:50%;background:' + color + ';border:2px solid ' + (activeColor === color ? 'var(--color-text)' : 'transparent') + ';cursor:pointer;padding:0;flex-shrink:0;transition:transform 0.1s;';
+        swatch.onclick = function() {
+          activeColor = color;
+          updateToolbar();
+        };
+        swatch.onmouseenter = function() { swatch.style.transform = 'scale(1.15)'; };
+        swatch.onmouseleave = function() { swatch.style.transform = 'scale(1)'; };
+        swatch.dataset.colorSwatch = color;
+        tb.appendChild(swatch);
+      })(COLORS[j]);
+    }
+
+    /* v7.x — recent-colors row (session-scoped, see recentColors' own
+       comment) rendered into its own container so updateToolbar() can
+       refresh just this piece without rebuilding the whole toolbar. */
+    var recentRow = document.createElement('div');
+    recentRow.id = 'annotate-recent-colors';
+    recentRow.style.cssText = 'display:flex;align-items:center;gap:4px;';
+    tb.appendChild(recentRow);
+
+    /* v7.x — custom color, via Kanvaz's own picker (colorpicker.js)
+       rather than a hidden native <input type="color"> proxy — same
+       anchoring class of bug the color-card swatch had (a hidden proxy
+       with no reliable on-screen position for a native popup to anchor
+       to), avoided entirely by not depending on a native popup here. */
+    var customSwatch = document.createElement('button');
+    customSwatch.title = 'Custom color';
+    customSwatch.textContent = '+';
+    customSwatch.style.cssText = 'width:14px;height:14px;border-radius:50%;background:var(--color-surface-2);border:1px dashed var(--color-text-3);cursor:pointer;padding:0;flex-shrink:0;font-size:10px;line-height:12px;color:var(--color-text-3);transition:transform 0.1s;';
+    customSwatch.onmouseenter = function() { customSwatch.style.transform = 'scale(1.15)'; customSwatch.style.color = 'var(--color-text)'; customSwatch.style.borderColor = 'var(--color-text)'; };
+    customSwatch.onmouseleave = function() { customSwatch.style.transform = 'scale(1)'; customSwatch.style.color = 'var(--color-text-3)'; customSwatch.style.borderColor = 'var(--color-text-3)'; };
+    customSwatch.onclick = function() {
+      var rect = customSwatch.getBoundingClientRect();
+      KanvazColorPicker.open(rect.left, rect.bottom + 6, activeColor, {
+        onChange: function(hex) {
+          activeColor = hex.toUpperCase();
+          updateToolbar();
+        },
+        onCommit: function(hex) {
+          activeColor = hex.toUpperCase();
+          if (recentColors.indexOf(activeColor) === -1 && COLORS.indexOf(activeColor) === -1) {
+            recentColors.unshift(activeColor);
+            if (recentColors.length > RECENT_COLORS_MAX) recentColors.length = RECENT_COLORS_MAX;
+          }
+          updateToolbar();
+        }
+      });
+    };
+    tb.appendChild(customSwatch);
+
+    /* Separator */
+    var sep2 = document.createElement('div');
+    sep2.style.cssText = 'width:1px;height:16px;background:var(--color-border);margin:0 2px;';
+    tb.appendChild(sep2);
+
+    /* Width buttons */
+    for (var k = 0; k < WIDTHS.length; k++) {
+      (function(width) {
+        var btn = document.createElement('button');
+        btn.style.cssText = 'background:' + (activeWidth === width ? 'var(--color-accent-bg)' : 'transparent') + ';border:1px solid ' + (activeWidth === width ? 'var(--color-accent)' : 'transparent') + ';border-radius:4px;cursor:pointer;color:var(--color-text);padding:3px 6px;display:flex;align-items:center;justify-content:center;';
+        var dot = document.createElement('div');
+        dot.style.cssText = 'width:' + Math.min(width * 2, 10) + 'px;height:' + Math.min(width * 2, 10) + 'px;border-radius:50%;background:currentColor;';
+        btn.appendChild(dot);
+        btn.onclick = function() {
+          activeWidth = width;
+          updateToolbar();
+        };
+        btn.onmouseenter = function() { if (activeWidth !== width) btn.style.background = 'var(--color-surface-2)'; };
+        btn.onmouseleave = function() { if (activeWidth !== width) btn.style.background = 'transparent'; };
+        btn.dataset.widthBtn = width;
+        tb.appendChild(btn);
+      })(WIDTHS[k]);
+    }
+
+    /* Separator */
+    var sep3 = document.createElement('div');
+    sep3.style.cssText = 'width:1px;height:16px;background:var(--color-border);margin:0 2px;';
+    tb.appendChild(sep3);
+
+    /* v7.x — per-stroke opacity slider. Direct oninput assignment, not
+       delegated through the tool/color/width buttons' shared onclick
+       pattern above — a native range input needs its own live 'input'
+       listener to track a drag, same reasoning cards.js's own volume
+       slider (buildVolumeSlider) already documents. */
+    var opacitySlider = document.createElement('input');
+    opacitySlider.type = 'range';
+    opacitySlider.min = 0.15;
+    opacitySlider.max = 1;
+    opacitySlider.step = 0.05;
+    opacitySlider.value = activeOpacity;
+    opacitySlider.title = 'Opacity';
+    opacitySlider.dataset.opacitySlider = '1';
+    opacitySlider.style.cssText = 'width:44px;accent-color:var(--color-accent);';
+    opacitySlider.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+
+    var opacityLabel = document.createElement('span');
+    opacityLabel.dataset.opacityLabel = '1';
+    opacityLabel.style.cssText = 'font-family:var(--font-mono);font-size:10px;color:var(--color-text-3);min-width:26px;text-align:right;';
+    opacityLabel.textContent = Math.round((activeTool === 'highlighter' ? Math.min(activeOpacity, 0.35) : activeOpacity) * 100) + '%';
+
+    opacitySlider.oninput = function() {
+      activeOpacity = parseFloat(opacitySlider.value);
+      updateOpacityDisplay();
+    };
+    tb.appendChild(opacitySlider);
+    tb.appendChild(opacityLabel);
+
+    /* Separator */
+    var sep4 = document.createElement('div');
+    sep4.style.cssText = 'width:1px;height:16px;background:var(--color-border);margin:0 2px;';
+    tb.appendChild(sep4);
+
+    /* Clear button */
+    var clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Clear';
+    clearBtn.style.cssText = 'background:transparent;border:1px solid transparent;border-radius:4px;cursor:pointer;color:var(--color-red);padding:3px 6px;font-size:11px;';
+    clearBtn.onmouseenter = function() { clearBtn.style.borderColor = 'var(--color-red)'; };
+    clearBtn.onmouseleave = function() { clearBtn.style.borderColor = 'transparent'; };
+    clearBtn.onclick = function() { clearAnnotations(cardId); };
+    tb.appendChild(clearBtn);
+
+    /* Done button */
+    var doneBtn = document.createElement('button');
+    doneBtn.textContent = 'Done';
+    doneBtn.style.cssText = 'background:var(--color-accent-bg);border:1px solid var(--color-accent);border-radius:4px;cursor:pointer;color:var(--color-accent);padding:3px 8px;font-size:11px;margin-left:2px;';
+    doneBtn.onclick = function() { deactivate(); };
+    tb.appendChild(doneBtn);
+
+    document.body.appendChild(tb);
+    toolbarEl = tb;
+    toolbarCardId = cardId;
+    renderRecentColors();
+
+    /* Position above the card — and keep repositioning when the canvas
+       pans/zooms. The toolbar is position:fixed (so it doesn't scroll
+       with the canvas world), but the card it's anchored to IS inside
+       the canvas world, so its screen position changes on every
+       pan/zoom. Watch for style changes on the transform parent. */
+    repositionToolbar();
+    var worldEl = document.getElementById('canvas-world');
+    if (worldEl && typeof MutationObserver !== 'undefined') {
+      toolbarObserver = new MutationObserver(function() { repositionToolbar(); });
+      toolbarObserver.observe(worldEl, { attributes: true, attributeFilter: ['style'] });
+    }
+    /* Audit fix: the MutationObserver above only catches the card
+       moving relative to the screen because the canvas itself panned/
+       zoomed (transform style change on #canvas-world). A plain window
+       resize that shifts #canvas-container's own screen offset — e.g.
+       a sidebar/toolbar reflow — doesn't touch that transform at all,
+       so the toolbar could drift away from the card it's anchored to
+       until the next pan/zoom happened to nudge it back into sync. */
+    window.addEventListener('resize', repositionToolbar);
+  }
+
+  var toolbarCardId = null;
+  var toolbarObserver = null;
+
+  function repositionToolbar() {
+    if (!toolbarEl || !toolbarCardId) return;
+    var cardEl = document.getElementById(toolbarCardId);
+    if (!cardEl) return;
+    var rect = cardEl.getBoundingClientRect();
+
+    /* Direct feedback: a card annotated at a large on-screen size (a
+       big card, or the canvas zoomed in) made the toolbar look "small
+       and unfair" next to it — the toolbar's own pixel size never
+       responded to canvas zoom at all, staying screen-space-fixed while
+       everything else on the board visually scaled with it. Scaling the
+       whole toolbar as one CSS transform (rather than resizing every
+       button/icon/swatch individually) tracks the canvas zoom directly.
+       Clamped to [0.75, 1.6] — small enough that a heavily zoomed-out
+       board doesn't shrink the toolbar into unclickable targets, large
+       enough that a heavily zoomed-in one doesn't blow it up past
+       comfortable reach. */
+    var zoom = (typeof KanvazCanvas !== 'undefined' && KanvazCanvas.getScale) ? KanvazCanvas.getScale() : 1;
+    var toolbarScale = Math.min(1.6, Math.max(0.75, zoom));
+    toolbarEl.style.transform = 'scale(' + toolbarScale + ')';
+    /* Anchor the SCALED box's bottom-left corner to the same point the
+       unscaled box would have used — growth/shrink then happens upward
+       (away from the card) rather than downward into it. */
+    toolbarEl.style.transformOrigin = 'bottom left';
+
+    /* Audit fix: this used to subtract a fixed 44px (one row's worth),
+       assuming the toolbar is always exactly one row tall — true when
+       it shipped with 5 tools, no longer true since v7.3.0 grew it to
+       9 tools plus a color picker/recent-colors row/opacity slider,
+       which commonly wraps onto a second row (toolbarEl has
+       flex-wrap:wrap). A stale single-row offset put the toolbar's
+       bottom row overlapping the top of the card it's annotating.
+       Measuring the toolbar's own live rendered height instead of
+       guessing a constant keeps this correct regardless of how many
+       rows it currently wraps to. `offsetHeight` reports the PRE-
+       transform layout size (CSS transforms are paint-only, never
+       affect layout/offsetHeight/offsetWidth) — with transform-origin
+       set to the box's own bottom-left corner above, that corner sits
+       at the fixed screen point (left, top + offsetHeight) regardless
+       of scale, so this formula doesn't need to account for
+       toolbarScale at all: it only has to place that UNSCALED corner
+       at the gap-above-the-card point, and the scale transform grows
+       the box upward/away from the card from there, never back down
+       into it. */
+    var toolbarHeight = toolbarEl.offsetHeight || 44;
+    toolbarEl.style.left = rect.left + 'px';
+    toolbarEl.style.top  = Math.max(4, rect.top - toolbarHeight - 8) + 'px';
+  }
+
+  /* v7.x — renders the recent-colors row fresh every time (cheap — at
+     most RECENT_COLORS_MAX swatches), called from showToolbar's initial
+     build and again whenever the custom color picker adds a new one. */
+  function renderRecentColors() {
+    if (!toolbarEl) return;
+    var row = toolbarEl.querySelector('#annotate-recent-colors');
+    if (!row) return;
+    row.innerHTML = '';
+    for (var i = 0; i < recentColors.length; i++) {
+      (function(color) {
+        var swatch = document.createElement('button');
+        swatch.style.cssText = 'width:14px;height:14px;border-radius:50%;background:' + color + ';border:2px solid ' + (activeColor === color ? 'var(--color-text)' : 'transparent') + ';cursor:pointer;padding:0;flex-shrink:0;transition:transform 0.1s;';
+        swatch.title = color;
+        swatch.onclick = function() {
+          activeColor = color;
+          updateToolbar();
+        };
+        swatch.onmouseenter = function() { swatch.style.transform = 'scale(1.15)'; };
+        swatch.onmouseleave = function() { swatch.style.transform = 'scale(1)'; };
+        swatch.dataset.colorSwatch = color;
+        row.appendChild(swatch);
+      })(recentColors[i]);
+    }
+  }
+
+  /* Audit fix: the opacity slider/label were only ever set once, at
+     toolbar-build time — switching tools never refreshed them, so after
+     picking the highlighter (which hard-clamps its EFFECTIVE opacity to
+     35% regardless of the slider) the slider kept showing whatever
+     percentage was last set for a different tool, visibly lying about
+     what the highlighter would actually draw at. Shows the clamped
+     value for the highlighter, the real activeOpacity for every other
+     tool — the slider's own position (draggable range) is left alone
+     either way, since activeOpacity itself is unclamped and shared
+     across tools; only the highlighter's rendering clamps it. */
+  function updateOpacityDisplay() {
+    if (!toolbarEl) return;
+    var slider = toolbarEl.querySelector('[data-opacity-slider]');
+    var label  = toolbarEl.querySelector('[data-opacity-label]');
+    if (!label) return;
+    var effective = activeTool === 'highlighter' ? Math.min(activeOpacity, 0.35) : activeOpacity;
+    if (slider) slider.value = activeOpacity;
+    label.textContent = Math.round(effective * 100) + '%';
+  }
+
+  function updateToolbar() {
+    if (!toolbarEl) return;
+    updateOpacityDisplay();
+    var toolBtns   = toolbarEl.querySelectorAll('[data-tool-btn]');
+    var swatches   = toolbarEl.querySelectorAll('[data-color-swatch]');
+    var widthBtns  = toolbarEl.querySelectorAll('[data-width-btn]');
+
+    for (var i = 0; i < toolBtns.length; i++) {
+      var isActive = toolBtns[i].dataset.toolBtn === activeTool;
+      toolBtns[i].style.background  = isActive ? 'var(--color-accent-bg)' : 'transparent';
+      toolBtns[i].style.borderColor = isActive ? 'var(--color-accent)'    : 'transparent';
+    }
+    /* Recent-color swatches carry the same [data-color-swatch] marker as
+       the built-in ones, so re-render them first (in case activeColor
+       just changed to a brand-new custom one that isn't in the DOM yet
+       at all) before the shared border-highlight pass below runs. */
+    renderRecentColors();
+    swatches = toolbarEl.querySelectorAll('[data-color-swatch]');
+    for (var j = 0; j < swatches.length; j++) {
+      swatches[j].style.borderColor = swatches[j].dataset.colorSwatch === activeColor
+        ? 'var(--color-text)' : 'transparent';
+    }
+    for (var k = 0; k < widthBtns.length; k++) {
+      var isActiveW = parseInt(widthBtns[k].dataset.widthBtn) === activeWidth;
+      widthBtns[k].style.background  = isActiveW ? 'var(--color-accent-bg)' : 'transparent';
+      widthBtns[k].style.borderColor = isActiveW ? 'var(--color-accent)'    : 'transparent';
+    }
+  }
+
+  function hideToolbar() {
+    if (toolbarObserver) { toolbarObserver.disconnect(); toolbarObserver = null; }
+    window.removeEventListener('resize', repositionToolbar);
+    if (toolbarEl && toolbarEl.parentNode) {
+      toolbarEl.parentNode.removeChild(toolbarEl);
+    }
+    toolbarEl = null;
+    toolbarCardId = null;
+  }
+
+  /* ── Serialise / deserialise ── */
+
+  function getStrokes(cardId) {
+    var ov = overlays[cardId];
+    return ov ? ov.strokes : [];
+  }
+
+  function loadStrokes(cardId, strokes, cardEl) {
+    if (!overlays[cardId]) attach(cardId, cardEl);
+    var ov = overlays[cardId];
+    ov.strokes = strokes || [];
+    /* One-time migration of pre-4.9.1 absolute-pixel saves: convert using
+       the card's current (saved) size, then the mutated ov.strokes will
+       naturally serialize back out normalized on the next save — no
+       explicit format-version bump needed. Best-effort for files where
+       the card was resized after drawing but before this fix shipped;
+       still strictly better than the unbounded drift it replaces. */
+    var size = null;
+    for (var i = 0; i < ov.strokes.length; i++) {
+      if (strokeLooksLegacy(ov.strokes[i])) {
+        size = size || getCardSize(cardId);
+        migrateLegacyStroke(ov.strokes[i], size);
+      }
+    }
+    redraw(cardId);
+  }
+
+  function detach(cardId) {
+    var ov = overlays[cardId];
+    if (ov && ov.canvas && ov.canvas.parentNode) {
+      ov.canvas.parentNode.removeChild(ov.canvas);
+    }
+    delete overlays[cardId];
+    if (activeCardId === cardId) deactivate();
+  }
+
+  /* Detach ALL overlays at once — used on board switch / clearAll.
+     Without this, every board switch leaves the previous board's
+     detached <canvas> overlay elements (and their stroke arrays)
+     referenced forever in `overlays`, since individual card elements
+     are removed from the DOM but never unregistered here. */
+  function detachAll() {
+    for (var id in overlays) {
+      var ov = overlays[id];
+      if (ov && ov.canvas && ov.canvas.parentNode) {
+        ov.canvas.parentNode.removeChild(ov.canvas);
+      }
+    }
+    overlays = {};
+    deactivate();
+  }
+
+  function getActiveCardId() {
+    return activeCardId;
+  }
+
+  /* Tool/color setters — a second entry point into the same activeTool/
+     activeColor state the floating toolbar's own buttons mutate
+     directly via closure. Added so the Properties panel's mirrored
+     controls (built from the same TOOLS/COLORS lists) drive real,
+     shared annotation state instead of a second parallel notion of
+     "what tool is selected" that could drift out of sync with the
+     toolbar actually drawing strokes. */
+  function setActiveTool(id) {
+    activeTool = id;
+    updateToolbar();
+  }
+
+  function setActiveColor(hex) {
+    activeColor = hex;
+    updateToolbar();
+  }
+
+  /* Direct request: brush/tool width must be adjustable from the
+     Properties panel too, not just the floating toolbar's 3 preset
+     buttons (2/4/8px) — same "toolbar has quick picks, Properties has
+     the precise numeric control" split Scratch Board's own Width row
+     already uses. Clamped to the same sane range Scratch Board uses
+     (1-24) rather than a second, differently-chosen ceiling. */
+  var MIN_WIDTH = 1, MAX_WIDTH = 24;
+  function getWidth() { return activeWidth; }
+  function setWidth(v) {
+    v = parseFloat(v);
+    if (!isFinite(v)) return;
+    activeWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, v));
+    updateToolbar();
+  }
+  function getWidths() { return WIDTHS; }
+
+  function getTools() {
+    return TOOLS;
+  }
+
+  function getColors() {
+    return COLORS;
+  }
+
+  function getActiveTool() {
+    return activeTool;
+  }
+
+  function getActiveColor() {
+    return activeColor;
+  }
+
+  return {
+    attach:           attach,
+    detach:           detach,
+    detachAll:        detachAll,
+    resize:           resize,
+    activate:         activate,
+    deactivate:       deactivate,
+    toggleVisibility: toggleVisibility,
+    clearAnnotations: clearAnnotations,
+    getStrokes:       getStrokes,
+    loadStrokes:      loadStrokes,
+    getActiveCardId:  getActiveCardId,
+    setActiveTool:    setActiveTool,
+    setActiveColor:   setActiveColor,
+    getTools:         getTools,
+    getColors:        getColors,
+    getActiveTool:    getActiveTool,
+    getActiveColor:   getActiveColor,
+    getWidth:         getWidth,
+    setWidth:         setWidth,
+    getWidths:        getWidths
+  };
+
+})();

@@ -1,0 +1,284 @@
+{
+  "name": "kanvaz-billfish-zh-cn",
+  "version": "9.9.1",
+  "description": "Kanvaz Billfish 中文素材板（只读关联版）",
+  "private": true,
+  "main": "src/main.js",
+  "author": "Atharva Patil | P4inz | P4inz Interactive Labs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/p4inz-code/kanvaz.git"
+  },
+  "bugs": {
+    "url": "https://github.com/p4inz-code/kanvaz/issues"
+  },
+  "homepage": "https://github.com/p4inz-code/kanvaz#readme",
+  "scripts": {
+    "start": "electron .",
+    "gen:nsis-associations": "node tools/gen-nsis-associations.js",
+    "prepare:ffmpeg": "node tools/fetch-ffmpeg.js",
+    "build:win": "npm run prepare:ffmpeg && npm run gen:nsis-associations && electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "npm run gen:nsis-associations && electron-builder --win --mac --linux",
+    "dist": "npm run gen:nsis-associations && electron-builder --win",
+    "lint": "node test/lint.js",
+    "validate": "node test/validate.js",
+    "test:ports": "node test/run-port-test.js",
+    "test:format": "node test/format-roundtrip-test.js",
+    "test:plugins": "node test/plugin-loader-test.js",
+    "test:billfish": "node test/billfish-test.js && node test/billfish-main-test.js && node test/i18n-test.js",
+    "test:sequence": "node test/sequence-detect-test.js",
+    "test:ui": "node test/billfish-ui-test.js"
+  },
+  "devDependencies": {
+    "electron": "44.4.3",
+    "electron-builder": "26.15.3",
+    "puppeteer-core": "^25.3.0"
+  },
+  "build": {
+    "appId": "cn.local.kanvaz.billfish.zh-cn",
+    "productName": "Kanvaz Billfish 中文素材板",
+    "copyright": "Copyright 2026 Atharva Patil | P4inz | P4inz Interactive Labs",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "CHANGELOG.md",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md",
+      "docs/BILLFISH_USER_GUIDE.md",
+      "docs/FRAME_NOTES_9.9.0.md",
+      "docs/CHANGES_9.9.1.md"
+    ],
+    "extraResources": [
+      {
+        "from": ".tools/ffmpeg-n8.1-lgpl/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1/bin",
+        "to": "ffmpeg",
+        "filter": [
+          "ffmpeg.exe",
+          "ffprobe.exe",
+          "*.dll"
+        ]
+      },
+      {
+        "from": ".tools/ffmpeg-n8.1-lgpl/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1/LICENSE.txt",
+        "to": "ffmpeg/LICENSE.txt"
+      }
+    ],
+    "fileAssociations": [],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icons/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icons/icon.icns",
+      "minimumSystemVersion": "12.0.0",
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Image",
+            "CFBundleTypeExtensions": [
+              "jpg",
+              "jpeg",
+              "png",
+              "bmp",
+              "webp"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "Animated GIF",
+            "CFBundleTypeExtensions": [
+              "gif"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "Video",
+            "CFBundleTypeExtensions": [
+              "mp4",
+              "webm",
+              "mov",
+              "mkv",
+              "avi"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "Audio",
+            "CFBundleTypeExtensions": [
+              "mp3",
+              "wav",
+              "ogg",
+              "m4a"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "3D Model",
+            "CFBundleTypeExtensions": [
+              "glb",
+              "gltf",
+              "obj",
+              "fbx",
+              "stl",
+              "ply",
+              "vox",
+              "usd",
+              "usda",
+              "usdc",
+              "usdz"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "Blender File",
+            "CFBundleTypeExtensions": [
+              "blend"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "PDF Document",
+            "CFBundleTypeExtensions": [
+              "pdf"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "Adobe File",
+            "CFBundleTypeExtensions": [
+              "psd",
+              "psb",
+              "ai",
+              "xd",
+              "indd",
+              "indt"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "HDR/EXR Image",
+            "CFBundleTypeExtensions": [
+              "hdr",
+              "pic",
+              "exr"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "Krita File",
+            "CFBundleTypeExtensions": [
+              "kra"
+            ],
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate"
+          }
+        ]
+      }
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icons/icon.png",
+      "mimeTypes": [
+        "application/x-kanvaz",
+        "image/jpeg",
+        "image/png",
+        "image/bmp",
+        "image/webp",
+        "image/gif",
+        "video/mp4",
+        "video/webm",
+        "video/quicktime",
+        "video/x-matroska",
+        "video/x-msvideo",
+        "audio/mpeg",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/ogg",
+        "audio/mp4",
+        "model/gltf-binary",
+        "model/gltf+json",
+        "model/obj",
+        "model/stl",
+        "model/vnd.usdz+zip",
+        "application/x-blender",
+        "application/pdf",
+        "image/vnd.adobe.photoshop",
+        "application/vnd.adobe.illustrator",
+        "application/vnd.adobe.xd",
+        "application/x-indesign",
+        "image/vnd.radiance",
+        "image/x-exr",
+        "application/x-krita"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icons/icon.ico",
+      "uninstallerIcon": "assets/icons/icon.ico",
+      "installerSidebar": "assets/installer-sidebar.bmp",
+      "uninstallerSidebar": "assets/installer-sidebar.bmp",
+      "license": "LICENSE",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "include": "build/installer.nsh",
+      "artifactName": "Kanvaz-Billfish-ZhCN-${version}-Setup.${ext}",
+      "language": "2052",
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ]
+    },
+    "executableName": "Kanvaz-Billfish",
+    "portable": {
+      "artifactName": "Kanvaz-Billfish-ZhCN-${version}-Portable.${ext}"
+    },
+    "publish": null
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "jszip": "^3.10.1",
+    "wink-distance": "^2.0.2",
+    "wink-eng-lite-web-model": "^1.8.1",
+    "wink-nlp": "^1.14.3"
+  }
+}

@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Old deliverable zips (dev artifacts, not part of source)
+*.zip
+
+# Internal development notes — not for public repo
+SESSION_MEMORY*.md
+test/node_modules/
+*.mp4
+*.mov
+
+# Local test assets that must never be committed
+/*.fbx
+
+# Personal files that must never be committed (donation QR / rollout assets).
+# They live untracked in the owner's checkout; this stops `git add -A` or
+# `git add .` from staging them by accident.
+/upi-qr.jpeg
+/download.jpe
+/docs/handoff-assets/donate-rollout/
+
+# Local runtimes, fixtures, and test profiles
+.tools/
+
+/work/

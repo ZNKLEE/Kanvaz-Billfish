@@ -1,0 +1,252 @@
+{
+  "upstreamCommit": "a52f6588cd47d1362300bda2d33c15b565fea207",
+  "branch": "billfish-zh-cn",
+  "scope": "Independent Kanvaz fork; no Billfish installation or library files modified",
+  "files": [
+    {
+      "file": ".gitignore",
+      "baselineSha256": "2fee2342d25490c0611fe1fb98d730e9edbc900a544503197a759abb6f9deeac",
+      "deliverySha256": "b0172c42744680529bd56264e1a189d31a3cd26290ca03c1df7579d03a4d96f7"
+    },
+    {
+      "file": "README.md",
+      "baselineSha256": "fe80e0ef4bd60a8120c10373e435608b048ae836b84714f719fb5be26013fe39",
+      "deliverySha256": "17051bfd0b917e9acbe7a39c1089680c217e5311b8f1e246a2d0e809d3e3aa17"
+    },
+    {
+      "file": "THIRD_PARTY_NOTICES.md",
+      "baselineSha256": "9bdc825cdff3e42a108b9ccf4612e250e23d2a019eed33edabea34bfe535ad57",
+      "deliverySha256": "06eb9ca3926e2baa5478e295c538a88bea97fd0571de4cc54be3c96ec8c4b232"
+    },
+    {
+      "file": "build/installer.nsh",
+      "baselineSha256": "e28ff66d816b2d272c78dd4a7469b7d4312329c3f99e51bfd05ce2de747fd1fd",
+      "deliverySha256": "b2be2ea2759adf89243255056977a61934c93cfa698153423be7af80fd7ebca6"
+    },
+    {
+      "file": "docs/BILLFISH_BUILD.md",
+      "baselineSha256": null,
+      "deliverySha256": "f231f4499793bc9fa9277da845365aff570e6b5a614d1a4a1975676ad7ac5334"
+    },
+    {
+      "file": "docs/BILLFISH_CHANGELOG.md",
+      "baselineSha256": null,
+      "deliverySha256": "47a9779bafbad84145738ee7f6e03fa08a30d89fdec817d26c98f8caabe22400"
+    },
+    {
+      "file": "docs/BILLFISH_LAUNCHER.md",
+      "baselineSha256": null,
+      "deliverySha256": "4e2f887aa93d17a03ed3c95fd3db02a889c0e3d6ca227972ec34e080b06f5f27"
+    },
+    {
+      "file": "docs/BILLFISH_TEST_REPORT.md",
+      "baselineSha256": null,
+      "deliverySha256": "f36102c99d80d0069405e4840c2c2ab79dfd8ff6e2657718b589f20a4a8101f0"
+    },
+    {
+      "file": "docs/BILLFISH_USER_GUIDE.md",
+      "baselineSha256": null,
+      "deliverySha256": "9fc6e1824b5a4bdbd5e4fe2509f063d1e183b07cc250c6e04b616e32bd7f872f"
+    },
+    {
+      "file": "docs/FRAME_NOTES_9.9.0.md",
+      "baselineSha256": null,
+      "deliverySha256": "f398a42345b9347b96ccfb2f6f94c509fad7dc2fc853ac7b6999e042c1819cb3"
+    },
+    {
+      "file": "docs/Kanvaz_Overview.pdf",
+      "baselineSha256": "11a39849dd9ff2ff9f94cb06f311e63704840c6b486fb71947fac43e074e2603",
+      "deliverySha256": "ebbf452f8a701fb943cea420b4026d54c9263528ec348d661f36de42b9a7cc27"
+    },
+    {
+      "file": "docs/index.html",
+      "baselineSha256": "651774d94440467e271e68d8d2bd6b9dff9369927541285585a3023b307f4ce1",
+      "deliverySha256": "3c62120529042a15b6f58fc64f8297d93fd567ec29e39bbb5f617d5993a6f2d3"
+    },
+    {
+      "file": "package-lock.json",
+      "baselineSha256": "8439e5a8bca9757598afb963cd126fc3ebca4d387dd1ae63a07d9308b908b0ef",
+      "deliverySha256": "ca7d1e71f5676b13b18e7d7be4a0e62f335de1e42f103381801dece9dad75a8b"
+    },
+    {
+      "file": "package.json",
+      "baselineSha256": "fed773c63ba1e8f18bd1d23533f332166173e19d12556a7f6fb3b21848434dec",
+      "deliverySha256": "08bde8f4f6d7504468e1e4f180cab567378b28ded8abae62b0a631a56d37d211"
+    },
+    {
+      "file": "src/app-ui.js",
+      "baselineSha256": "269332daad7b4dd12cef60c7b997a6c810fbfa67d54c42fd9b682546b003abe9",
+      "deliverySha256": "4f156d5346313cebb87ac30490f2c6aae2acb0f852d58c2be005a95ac3d3db58"
+    },
+    {
+      "file": "src/app.js",
+      "baselineSha256": "8b2ae5f7e6cad698007ed21965df7e015d37727a5c19f32606c29466693cdd69",
+      "deliverySha256": "5f61d321c6847217bf2ad713666f892a74cd624735a22747a02aa0025097fab0"
+    },
+    {
+      "file": "src/billfish-main.js",
+      "baselineSha256": null,
+      "deliverySha256": "f3ae71dbeffe4a129906d396bdab6d8ba7a340f6b54a928f6e52e0ea2ee818aa"
+    },
+    {
+      "file": "src/billfish-native-i18n.js",
+      "baselineSha256": null,
+      "deliverySha256": "4d20712197381587f771e1e548a1556d401fa6999dc13a0e88f0d93e63aac523"
+    },
+    {
+      "file": "src/billfish-store.js",
+      "baselineSha256": null,
+      "deliverySha256": "5a5a813786fd6cec2daf66fbadfe8c16ef7d287e5851693514c560270e0af46e"
+    },
+    {
+      "file": "src/billfish.css",
+      "baselineSha256": null,
+      "deliverySha256": "c0c455f3758e08f5093c607267f65b4dc24db31629be7ce6d6dceda38e7b0dbf"
+    },
+    {
+      "file": "src/billfish.js",
+      "baselineSha256": null,
+      "deliverySha256": "d08e3ac766bc46a96a83c2c4ba756d1a965037e66aee4eb6f02e19f6d906f0fe"
+    },
+    {
+      "file": "src/boards.js",
+      "baselineSha256": "a5ef901b05e8337815627b7050dee8a2bdbb4c3924e8f7979e7ed70db7691a77",
+      "deliverySha256": "ea6d9db9ec9c93077dcbece3aa39e8b40f6bb645f06c30736543f335758849d1"
+    },
+    {
+      "file": "src/canvas.js",
+      "baselineSha256": "06b49f46920da3c611afd2a0138a77878386d1c6f4b93cf0550203fcb5220a5c",
+      "deliverySha256": "e82b740315f9805328fb84bac38ea1d189fc7d35fc194806bc7e335c86842124"
+    },
+    {
+      "file": "src/cards.js",
+      "baselineSha256": "1b4bf077e878413651e55a6decc48b16bcff0fcc4af21306e9a12d36ed0da8dc",
+      "deliverySha256": "5e353434ce19217f403e8ee0ec32d8d6f6a80eefa9207b96b2d04d7893fc72c8"
+    },
+    {
+      "file": "src/errors.js",
+      "baselineSha256": "cc9ab0916966434d42a0f3ee35c16bdb3fb2232f9e2c64a8f01d3e3bf5291212",
+      "deliverySha256": "5d16ba74772d7e5f93512eaa2756e248f3742de0151d3e1160588aa0481a3b4e"
+    },
+    {
+      "file": "src/frame-media-main.js",
+      "baselineSha256": null,
+      "deliverySha256": "ddacf23eae757f5321017ea8da45e3289cff20a5f7b15602062054f8792f6c01"
+    },
+    {
+      "file": "src/frame-player.css",
+      "baselineSha256": null,
+      "deliverySha256": "78631b52b08a67952ce7b720ca5beef131ecf1fac634a3c7ce76d81e97bc302e"
+    },
+    {
+      "file": "src/frame-player.js",
+      "baselineSha256": null,
+      "deliverySha256": "8f6012cfe3e75a94abefb1db9c53305c2527770bdd7b7eee5075e28395f1cd66"
+    },
+    {
+      "file": "src/i18n-zh-cn.js",
+      "baselineSha256": null,
+      "deliverySha256": "2350550e0089a43cc41c74234ef6c7c0320da98511a4f23df8963c4db4c9ef8f"
+    },
+    {
+      "file": "src/i18n.js",
+      "baselineSha256": null,
+      "deliverySha256": "62deb748de5dcabc52030a3e806024fbf8f41a4ba03a77c438f1006edecb1941"
+    },
+    {
+      "file": "src/index.html",
+      "baselineSha256": "2706997da1d6afb2fc217441237ed2cc4b58981bbc0a99e657acaa6cc336446d",
+      "deliverySha256": "f463377817ea4df470891bd7c067ca8124b28f90519f991270c577fb1d11887d"
+    },
+    {
+      "file": "src/main.js",
+      "baselineSha256": "26a83d4ea5dd549f067b8b06aee5b478f91b92f937161a44c14f6a0567a28438",
+      "deliverySha256": "9ec332ee96f6568e876bb2f57b618070fff02ec86347b8f7280afceee271fd87"
+    },
+    {
+      "file": "src/media.js",
+      "baselineSha256": "673e505455640da35958391c25a662c0ed2b51e0dad1b154d1b9a097d19cc24d",
+      "deliverySha256": "75d0b54b04332c1371a309397929db9d19360b1afc77dfb7cc62eb982b1ef15c"
+    },
+    {
+      "file": "src/preload.js",
+      "baselineSha256": "a98e17493884c1dd6a761f123130806b9ba4c200faf5efb61dd0d971d4d88b31",
+      "deliverySha256": "2082010eaa3684697653ab54024eaf6e959a6109eaa0b223f955ca4a9c5f6b73"
+    },
+    {
+      "file": "src/properties.js",
+      "baselineSha256": "6a758e0b99526910a3294743ec45bacec2241b5145ed58f05391f548baefe511",
+      "deliverySha256": "413ae0e0064765403e7ceb049af596e7737d41470f1ad21b11369f1b486a14da"
+    },
+    {
+      "file": "src/sequence-detect.js",
+      "baselineSha256": null,
+      "deliverySha256": "9741aa4e4e43b55d4e2a9b7292ded0f19d8df77ca4e12f967f849ce7444bf7fc"
+    },
+    {
+      "file": "src/ui.js",
+      "baselineSha256": "5329406dfb9ba551d7ddbad0be21d990259ddd3f30d490648c15576320c08ec0",
+      "deliverySha256": "984c1a8ed71f96c4f4fd693f2dab9f50f3273713ca879a2278b0b761ec2ac7c8"
+    },
+    {
+      "file": "test/billfish-installer-test.js",
+      "baselineSha256": null,
+      "deliverySha256": "d12b330b57c337952e54227c2fd9b9b0c23f6d421395745eab454c37e077412a"
+    },
+    {
+      "file": "test/billfish-main-test.js",
+      "baselineSha256": null,
+      "deliverySha256": "06ed39cf59c407f9436653dbff47149ea9be5b302d9b103702a234c96219d732"
+    },
+    {
+      "file": "test/billfish-test.js",
+      "baselineSha256": null,
+      "deliverySha256": "7b9d3d6ad60d8b4af2251d85bfb4ea5192497f8dcdc82ad117fbeca485d9ca4f"
+    },
+    {
+      "file": "test/billfish-ui-test.js",
+      "baselineSha256": null,
+      "deliverySha256": "8ed8ae58080d19a50680da00a1bfc569e7e4a187c39ba11fcb95996eef869d84"
+    },
+    {
+      "file": "test/i18n-test.js",
+      "baselineSha256": null,
+      "deliverySha256": "9e6d85e61c0019eb31719b6dc2887683fc68bfe98eaac73db53a04e583ec7376"
+    },
+    {
+      "file": "test/make-performance-fixture.js",
+      "baselineSha256": null,
+      "deliverySha256": "fb61159ed09382f860325a32caad572e0d99fa71a4ea79c9d80041a35b94842a"
+    },
+    {
+      "file": "test/openable-types-test.js",
+      "baselineSha256": "adf89a6a5f7c28b9f523f562e15d41e5b7f8803fd27d93d6fc244cb1e6f79cea",
+      "deliverySha256": "0e150ec5f36bda2dbafec905e0341ca6399b8fe4934a9139af68121fd018e7b3"
+    },
+    {
+      "file": "test/sequence-detect-test.js",
+      "baselineSha256": null,
+      "deliverySha256": "933283ac2f89bf5a41832e61b6ff041594ea21468c4dae095d1a760078ad23ec"
+    },
+    {
+      "file": "tools/BillfishBoardLauncher.cs",
+      "baselineSha256": null,
+      "deliverySha256": "5ea9812b21cae57e8da8bdc0d9e4bb345f37c4a4e02aa49a8ab2ed0e248a41a3"
+    },
+    {
+      "file": "tools/fetch-ffmpeg.js",
+      "baselineSha256": null,
+      "deliverySha256": "fa51adf0334cbb4b972b8c3f38d133dc43b2f754e68944fb3e4b2b6963801320"
+    },
+    {
+      "file": "tools/gen-nsis-associations.js",
+      "baselineSha256": "2b1d638401858a4c706eef73257d370bb3d380745f54c6c8c796e62ed9d76bde",
+      "deliverySha256": "be69c74ed20841a2ace1398e91fa9adc10a974cceee5c0d4a1f649823b894e64"
+    },
+    {
+      "file": "tools/package-billfish-source.py",
+      "baselineSha256": null,
+      "deliverySha256": "203d3d4733ad005e09312d177fe0422cc31fed65722cbe041a219ed52cad4426"
+    }
+  ]
+}
